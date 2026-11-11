@@ -96,7 +96,7 @@ def _make_row(component: str, product: str, source: Path, origin: str,
             status, eos = "no EOL date", DASH
         else:
             status, eos = "supported", match.eol_from
-    found_in = str(source) + (" (via Maven)" if via_maven else "")
+    found_in = source.as_posix() + (" (via Maven)" if via_maven else "")
     return Row(component, tuple(names), shown, found_in, eos, latest, status)
 
 

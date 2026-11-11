@@ -20,8 +20,16 @@ def _warn(message: str) -> None:
     print(message, file=sys.stderr)
 
 
+def _make_stderr_safe() -> None:
+    """A legacy Windows console can't encode every character (such as …); print ? instead of failing."""
+    reconfigure = getattr(sys.stderr, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(errors="replace")
+
+
 def main(argv: list[str] | None = None, client=None, detectors=None,
          cache_dir: Path | None = None) -> int:
+    _make_stderr_safe()
     parser = argparse.ArgumentParser(
         prog="eolchecker",
         description="Check whether a repo's dependencies are past end-of-life.",

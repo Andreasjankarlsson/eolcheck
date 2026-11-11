@@ -1,6 +1,6 @@
 import csv
 import io
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 from rich.console import Console
@@ -93,6 +93,17 @@ def test_csv(tmp_path):
         ["", "couldn't resolve ${x}", "", "a/pom.xml", "", "", "not recognised"],
         ["", "lombok", "", "a/pom.xml", "", "", "not tracked"],
     ]
+
+
+def test_windows_paths_print_and_write_with_forward_slashes(tmp_path):
+    win = PureWindowsPath("backend") / "pom.xml"
+    out = _out([], unrecognised=[Unrecognised(win, "couldn't parse pom.xml")], untracked={win: ["lombok"]})
+    assert "  backend/pom.xml: couldn't parse pom.xml" in out
+    assert "  backend/pom.xml: lombok" in out
+    assert "\\" not in out
+    write_csv(tmp_path / "r.csv", [], [Unrecognised(win, "x")], {win: ["lombok"]})
+    rows = list(csv.reader((tmp_path / "r.csv").open(encoding="utf-8", newline="")))
+    assert [r[3] for r in rows[1:]] == ["backend/pom.xml", "backend/pom.xml"]
 
 
 def test_csv_dash_cells_are_empty(tmp_path):

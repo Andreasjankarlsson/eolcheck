@@ -85,13 +85,13 @@ def render(repo_name: str, rows: list[Row], unrecognised: list[Unrecognised], co
     if unrecognised:
         console.print()
         console.print("Not recognised:")
-        for u in sorted(unrecognised, key=lambda u: str(u.source)):
-            console.print(f"  {escape(str(u.source))}: {escape(u.reason)}", soft_wrap=True)
+        for u in sorted(unrecognised, key=lambda u: u.source.as_posix()):
+            console.print(f"  {escape(u.source.as_posix())}: {escape(u.reason)}", soft_wrap=True)
     if untracked:
         console.print()
         console.print("Not on endoflife.date:")
-        for path in sorted(untracked, key=str):
-            console.print(f"  {escape(str(path))}: {escape(', '.join(untracked[path]))}", soft_wrap=True)
+        for path in sorted(untracked, key=Path.as_posix):
+            console.print(f"  {escape(path.as_posix())}: {escape(', '.join(untracked[path]))}", soft_wrap=True)
     console.print()
 
 
@@ -106,7 +106,7 @@ def write_csv(path: Path, rows: list[Row], unrecognised: list[Unrecognised],
         for r in rows:
             writer.writerow([r.component, "; ".join(r.dependencies), cell(r.version), cell(r.found_in),
                              cell(r.end_of_support), cell(r.latest), r.status])
-        for u in sorted(unrecognised, key=lambda u: str(u.source)):
-            writer.writerow(["", u.reason, "", str(u.source), "", "", "not recognised"])
-        for file in sorted(untracked or {}, key=str):
-            writer.writerow(["", "; ".join(untracked[file]), "", str(file), "", "", "not tracked"])
+        for u in sorted(unrecognised, key=lambda u: u.source.as_posix()):
+            writer.writerow(["", u.reason, "", u.source.as_posix(), "", "", "not recognised"])
+        for file in sorted(untracked or {}, key=Path.as_posix):
+            writer.writerow(["", "; ".join(untracked[file]), "", file.as_posix(), "", "", "not tracked"])

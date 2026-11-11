@@ -10,6 +10,7 @@ from .fakes import FakeClient, payload, product
 
 BODY = payload(product("php", "PHP"))
 OK = FullResponse(False, BODY, '"e1"')
+_real_user_cache_dir = cache.user_cache_dir  # the autouse fixture below replaces it
 
 
 @pytest.fixture(autouse=True)
@@ -190,3 +191,31 @@ def test_broken_config_warns_and_uses_default(tmp_path, monkeypatch):
 
 def test_checkout_root_finds_this_repo():
     assert (cache.checkout_root() / "pyproject.toml").exists()
+
+
+def test_windows_cache_dir_uses_localappdata(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache.sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+    assert _real_user_cache_dir() == tmp_path / "Local" / "eolchecker"
+
+
+def test_windows_cache_dir_without_localappdata(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache.sys, "platform", "win32")
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    monkeypatch.setattr(cache.Path, "home", classmethod(lambda cls: tmp_path))
+    assert _real_user_cache_dir() == tmp_path / "AppData" / "Local" / "eolchecker"
+
+
+def test_macos_cache_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache.sys, "platform", "darwin")
+    monkeypatch.setattr(cache.Path, "home", classmethod(lambda cls: tmp_path))
+    assert _real_user_cache_dir() == tmp_path / "Library" / "Caches" / "eolchecker"
+
+
+def test_linux_cache_dir_honours_xdg(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache.sys, "platform", "linux")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    assert _real_user_cache_dir() == tmp_path / "xdg" / "eolchecker"
+    monkeypatch.delenv("XDG_CACHE_HOME")
+    monkeypatch.setattr(cache.Path, "home", classmethod(lambda cls: tmp_path))
+    assert _real_user_cache_dir() == tmp_path / ".cache" / "eolchecker"

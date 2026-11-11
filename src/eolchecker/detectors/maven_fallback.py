@@ -19,13 +19,23 @@ def run_subprocess(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT_SECONDS)
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
 def find_maven(pom: Path, root: Path) -> list[str] | None:
-    """The nearest executable ./mvnw from the pom's folder up to the repo root, else mvn on PATH."""
+    """The nearest Maven wrapper from the pom's folder up to the repo root, else mvn on PATH.
+
+    The wrapper is mvnw.cmd on Windows (it only has to exist) and an executable mvnw elsewhere.
+    mvn is run by the full path `which` finds, since without a shell a bare "mvn" can't start mvn.cmd.
+    """
+    windows = _is_windows()
     for d in dirs_up(pom.parent, root):
-        wrapper = d / "mvnw"
-        if wrapper.is_file() and os.access(wrapper, os.X_OK):
+        wrapper = d / ("mvnw.cmd" if windows else "mvnw")
+        if wrapper.is_file() and (windows or os.access(wrapper, os.X_OK)):
             return [str(wrapper)]
-    return ["mvn"] if shutil.which("mvn") else None
+    found = shutil.which("mvn")
+    return [found] if found else None
 
 
 def effective_pom(pom: Path, root: Path, runner: Runner = run_subprocess,

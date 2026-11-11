@@ -10,8 +10,12 @@ versions the repo targets.
 You need [uv](https://docs.astral.sh/uv/). It fetches Python 3.11 or newer if
 you don't have it.
 
-Maven (or a `mvnw` in the project you scan) is optional. It is only used to
-find versions that are inherited from parent poms.
+It works on macOS, Linux and Windows. On Windows, run the same `uv` commands
+in PowerShell. Windows support is tested by simulation only (there is no
+Windows CI), so please report anything that breaks.
+
+Maven (or a `mvnw` in the project you scan; `mvnw.cmd` on Windows) is optional.
+It is only used to find versions that are inherited from parent poms.
 
 ```sh
 git clone <repo-url>
@@ -61,7 +65,8 @@ What the statuses mean:
 
 To install it as a command instead, run `uv tool install .` and then use
 `eolchecker ~/code/some-repo`. The cache then lives in your user cache folder
-(`~/Library/Caches/eolchecker` on macOS, `~/.cache/eolchecker` elsewhere).
+(`~/Library/Caches/eolchecker` on macOS, `%LOCALAPPDATA%\eolchecker` on
+Windows, `~/.cache/eolchecker` elsewhere).
 
 ## Cache and config
 

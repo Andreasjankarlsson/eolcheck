@@ -112,6 +112,42 @@ def test_prefers_mvnw(write_files, monkeypatch):
     assert "-N" in runner.calls[0]
 
 
+def test_windows_finds_mvnw_cmd_without_exec_bit(write_files, monkeypatch):
+    monkeypatch.setattr(maven_fallback, "_is_windows", lambda: True)
+    with_mvn(monkeypatch)
+    root = write_files({"api/pom.xml": COMPANY_POM, "mvnw.cmd": "@echo off\r\n"})
+    runner = FakeRunner()
+    detect(root, runner)
+    assert runner.calls[0][0] == str(root / "mvnw.cmd")
+    assert "help:effective-pom" in runner.calls[0]
+
+
+def test_windows_ignores_plain_mvnw(write_files, monkeypatch):
+    monkeypatch.setattr(maven_fallback, "_is_windows", lambda: True)
+    monkeypatch.setattr(maven_fallback.shutil, "which", lambda name: "C:\\maven\\bin\\mvn.cmd")
+    root = write_files({"api/pom.xml": COMPANY_POM, "mvnw": "#!/bin/sh\n"})
+    os.chmod(root / "mvnw", 0o755)
+    runner = FakeRunner()
+    detect(root, runner)
+    assert runner.calls[0][0] == "C:\\maven\\bin\\mvn.cmd"
+
+
+def test_mvn_on_path_is_run_by_the_full_path_which_returns(write_files, monkeypatch):
+    monkeypatch.setattr(maven_fallback.shutil, "which", lambda name: "/opt/maven/bin/mvn")
+    root = write_files({"api/pom.xml": COMPANY_POM})
+    runner = FakeRunner()
+    detect(root, runner)
+    assert runner.calls[0][0] == "/opt/maven/bin/mvn"
+
+
+def test_non_windows_ignores_mvnw_cmd_and_non_executable_mvnw(write_files, monkeypatch):
+    monkeypatch.setattr(maven_fallback, "_is_windows", lambda: False)
+    monkeypatch.setattr(maven_fallback.shutil, "which", lambda name: None)
+    root = write_files({"api/pom.xml": COMPANY_POM, "mvnw.cmd": "x", "mvnw": "#!/bin/sh\n"})
+    os.chmod(root / "mvnw", 0o644)
+    assert maven_fallback.find_maven(root / "api" / "pom.xml", root) is None
+
+
 def test_no_gaps_no_run(write_files, monkeypatch):
     with_mvn(monkeypatch)
     root = write_files({"api/pom.xml": COMPLETE_POM})

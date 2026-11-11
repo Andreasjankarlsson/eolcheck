@@ -28,6 +28,9 @@ def checkout_root() -> Path | None:
 def user_cache_dir() -> Path:
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Caches" / "eolchecker"
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        return (Path(local) if local else Path.home() / "AppData" / "Local") / "eolchecker"
     base = os.environ.get("XDG_CACHE_HOME")
     return (Path(base) if base else Path.home() / ".cache") / "eolchecker"
 

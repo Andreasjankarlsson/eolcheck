@@ -1,4 +1,4 @@
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 from eolchecker.catalog import PurlIndex
 from eolchecker.models import Dependency, finding
@@ -26,6 +26,14 @@ def test_one_row_per_product_lowest_version_wins():
     assert build_rows([], deps, index(BOOT)) == [
         Row("Spring Boot", ("spring-boot-starter-test", "spring-boot-starter-web"),
             "3.2.0 (also 3.4.1)", "backend/pom.xml", "2024-11-23", "4.1.2", "END OF LIFE")]
+
+
+def test_found_in_uses_forward_slashes_for_windows_paths():
+    source = PureWindowsPath("backend") / "pom.xml"
+    assert str(source) == "backend\\pom.xml"
+    [row] = build_rows([], [dep(WEB, "spring-boot-starter-web", "3.4.1", source=source, via_maven=True)],
+                       index(BOOT))
+    assert row.found_in == "backend/pom.xml (via Maven)"
 
 
 def test_same_versions_show_once():

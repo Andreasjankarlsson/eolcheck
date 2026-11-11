@@ -1,8 +1,10 @@
 import csv
+import io
+import sys
 from pathlib import Path
 
 from eolchecker.api import ApiUnavailable, FullResponse
-from eolchecker.cli import main
+from eolchecker.cli import _make_stderr_safe, main
 from eolchecker.models import Dependency, DetectResult, Unrecognised, finding
 
 from .fakes import FakeClient, payload, product, rel
@@ -52,6 +54,14 @@ def test_prints_table(write_files, tmp_path, capsys):
     out = capsys.readouterr().out
     for text in ["Angular", "Dependencies", "16.2.0", "frontend/package.json", "END OF LIFE", "Latest", "21.0.1", root.name]:
         assert text in out
+
+
+def test_stderr_never_raises_on_a_legacy_console(monkeypatch):
+    legacy = io.TextIOWrapper(io.BytesIO(), encoding="ascii")
+    monkeypatch.setattr(sys, "stderr", legacy)
+    _make_stderr_safe()
+    print("Asking Maven about pom.xml…", file=sys.stderr, flush=True)
+    assert legacy.buffer.getvalue() == b"Asking Maven about pom.xml?\n"
 
 
 def test_missing_path_exit_2(tmp_path, capsys):
