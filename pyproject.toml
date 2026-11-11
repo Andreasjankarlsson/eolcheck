@@ -1,7 +1,7 @@
 [project]
 name = "eolchecker"
 version = "0.1.0"
-description = "Check whether the major frameworks in a repo are past end-of-life"
+description = "Check whether a repo's dependencies are past end-of-life"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
