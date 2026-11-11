@@ -26,6 +26,15 @@ def test_table_has_dependencies_column():
     assert "spring-boot-starter-test, spring-boot-starter-web" in out
 
 
+def test_long_dependencies_cell_never_cuts_off_other_columns():
+    deps = tuple(f"spring-boot-starter-{n}" for n in ["web", "data-jpa", "security", "validation", "actuator", "test"])
+    row = Row("Spring Boot", deps, "3.2.0 (also 3.4.1)", "backend/services/payments/pom.xml",
+              "2024-11-23", "4.1.2", "END OF LIFE")
+    out = _out([row])
+    for text in ["END OF LIFE", "Spring Boot", "3.2.0 (also 3.4.1)", *deps]:
+        assert text in out
+
+
 def test_untracked_section():
     out = _out([ROW], [Unrecognised(Path("a/pom.xml"), "bad")],
                {Path("backend/pom.xml"): ["lombok", "slf4j-api"]})

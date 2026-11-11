@@ -29,7 +29,12 @@ def render(repo_name: str, rows: list[Row], unrecognised: list[Unrecognised], co
     if rows:
         table = Table(box=None, padding=(0, 2), header_style="bold")
         for col in ["Component", "Dependencies", "Version", "Found in", "End of support", "Latest", "Status"]:
-            table.add_column(col, no_wrap=True)
+            if col == "Dependencies":
+                table.add_column(col, no_wrap=False, overflow="fold")
+            elif col == "Found in":
+                table.add_column(col, overflow="fold")
+            else:
+                table.add_column(col, no_wrap=True, overflow="ignore")
         for r in rows:
             style = STATUS_STYLE.get(r.status, "")
             table.add_row(r.component, escape(", ".join(r.dependencies)), r.version, r.found_in, r.end_of_support, r.latest,
