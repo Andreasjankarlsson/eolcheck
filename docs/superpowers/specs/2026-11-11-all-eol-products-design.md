@@ -272,3 +272,22 @@ swappable with fakes.
 - Whether tracked/untracked is decided inside detectors (index in `Context`) or
   after detection.
 - Exact stderr wording.
+
+## Changes during implementation
+
+- **Versions from an in-repo parent's `<dependencyManagement>`.** A dependency
+  declared without a version whose version is only set in an in-repo parent's
+  `<dependencyManagement>` gets a row with that version, not "no row". The
+  managed value is resolved with the child's properties, as Maven does.
+- **Maven may run once per module.** When a child pom declares a tracked
+  dependency whose version only Spring Boot or a BOM sets, Maven is asked for
+  that pom's effective pom, so a multi-module repo can mean one Maven run per
+  module (`--no-maven` turns this off).
+- **Tracked BOM imports count as dependencies.** An entry in
+  `<dependencyManagement>` with `<scope>import</scope>` that endoflife.date
+  tracks (e.g. `spring-cloud-dependencies`) and whose version can be read is a
+  dependency. Without this Spring Cloud could never produce a row.
+- **Table layout.** The Dependencies column wraps (at the commas) and keeps a
+  minimum width of 18 characters while there is room. On narrow terminals End
+  of support and Latest give way first; Component, Status and the file path in
+  Found in are never broken, and Version only wraps at its space.

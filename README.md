@@ -39,11 +39,11 @@ happens when you are offline).
 
 Example output (shortened):
 
-| Component     | Dependencies                          | Version            | Found in     | End of support | Latest | Status      |
-|---------------|---------------------------------------|--------------------|--------------|----------------|--------|-------------|
-| Spring Boot   | spring-boot-starter-web, spring-boot-starter-test | 3.2.0 (also 3.4.1) | pom.xml | 2024-12-31 | 3.5.0  | END OF LIFE |
-| Java          | maven.compiler.release                | 21                 | pom.xml      | 2029-09-30     | 25     | supported   |
-| Angular       | @angular/core, @angular/common        | 17.3.0             | package.json | 2025-05-15     | 20.0.0 | END OF LIFE |
+| Component   | Dependencies                                      | Version            | Found in     | End of support | Latest | Status      |
+|-------------|---------------------------------------------------|--------------------|--------------|----------------|--------|-------------|
+| Spring Boot | spring-boot-starter-web, spring-boot-starter-test | 3.2.0 (also 3.4.1) | pom.xml      | 2024-12-31     | 3.5.0  | END OF LIFE |
+| Java        | maven.compiler.release                            | 21                 | pom.xml      | 2029-09-30     | 25     | supported   |
+| Angular     | @angular/core                                     | 17.3.0             | package.json | 2025-05-15     | 20.0.0 | END OF LIFE |
 
 The table above is only an example. The dates and versions are made up.
 
@@ -56,8 +56,8 @@ What the statuses mean:
 - `not tracked`: endoflife.date doesn't track the dependency. Shown only with
   `--show-untracked` (and in the CSV).
 - `not recognised`: only in the CSV. In the table these are listed under
-  "Not recognised": files where a tracked dependency is clearly used but its
-  version can't be read.
+  "Not recognised": files that can't be parsed, and files where a tracked
+  dependency is clearly used but its version can't be read.
 
 To install it as a command instead, run `uv tool install .` and then use
 `eolchecker ~/code/some-repo`. The cache then lives in your user cache folder
@@ -68,12 +68,14 @@ To install it as a command instead, run `uv tool install .` and then use
 The endoflife.date data is cached in `.cache/products-full.json` inside the
 checkout (the folder is git-ignored). Every run checks whether endoflife.date
 has changed and only downloads the data again if it has. If endoflife.date
-can't be reached, the cached copy is used and a line says how old it is.
+can't be reached, the cached copy is used and a line says the date it was
+fetched. If the cache folder can't be written, your user cache folder is used
+instead.
 
 To keep the cache somewhere else, create `eolchecker.toml` in the checkout:
 
 ```toml
-cache_dir = "some/other/folder"   # relative to the checkout
+cache_dir = "some/other/folder"   # relative to the checkout; ~ and absolute paths work too
 ```
 
 ## What it checks
@@ -85,7 +87,9 @@ and .NET versions the repo uses.
 
 Only direct dependencies are checked, including dev, test and plugin
 dependencies. Lock files are only used to get the exact version of a direct
-dependency. They are never used to find more packages.
+dependency. They are never used to find more packages. BOMs a pom imports
+(such as `spring-cloud-dependencies`) count as dependencies when
+endoflife.date tracks them.
 
 You get one row per product per file. If several dependencies of the same
 product have different versions, the lowest one is checked and the others are
