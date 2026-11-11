@@ -25,4 +25,5 @@ packages = ["src/eolchecker"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--basetemp=.pytest_tmp -p no:cacheprovider"
 markers = ["network: hits the real endoflife.date API (set EOLCHECKER_NETWORK=1)"]
