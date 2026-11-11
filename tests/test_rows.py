@@ -63,6 +63,18 @@ def test_runtime_findings_stay_one_row_each():
     assert all(r.dependencies == () for r in rows)
 
 
+def test_group_with_several_findings_becomes_its_own_row():
+    dotnet = product("dotnet", ".NET", ["pkg:nuget/Microsoft.AspNetCore.App"],
+                     [rel("8", "2023-11-14", False, "2026-11-10", "8.0.21"),
+                      rel("6", "2021-11-08", True, "2024-11-12", "6.0.36")])
+    csproj = Path("api/Api.csproj")
+    deps = [dep("nuget:microsoft.aspnetcore.app", "Microsoft.AspNetCore.App", "8.0.1", csproj)]
+    rows = build_rows([finding(".NET", "6.0", "net6.0", csproj), finding(".NET", "8.0", "net8.0", csproj)],
+                      deps, index(dotnet))
+    assert sorted((r.version, r.dependencies) for r in rows) == [
+        ("8.0.1", ("Microsoft.AspNetCore.App",)), ("net6.0", ()), ("net8.0", ())]
+
+
 def test_runtime_merges_with_matching_package_group():
     dotnet = product("dotnet", ".NET", ["pkg:nuget/Microsoft.AspNetCore.App"],
                      [rel("8", "2023-11-14", False, "2026-11-10", "8.0.21")])
