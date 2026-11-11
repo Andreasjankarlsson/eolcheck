@@ -4,7 +4,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
-from ..models import DetectResult, Unrecognised
+from ..catalog import PurlIndex
+from ..models import DetectResult, Dependency, Unrecognised
 from . import Context
 
 
@@ -33,3 +34,16 @@ def dirs_up(start: Path, root: Path) -> Iterable[Path]:
         if current == root or root not in current.parents:
             return
         current = current.parent
+
+
+def gaps_for(dependencies: list[Dependency], index: PurlIndex, path: Path, ctx: Context) -> list[Unrecognised]:
+    """One gap per tracked product whose version could not be read from any of its packages in this file."""
+    covered = {m.product for d in dependencies if d.version for m in index.resolve(d.key)}
+    gaps: dict[str, Unrecognised] = {}
+    for dep in dependencies:
+        if dep.version:
+            continue
+        matches = index.resolve(dep.key)
+        if matches and not any(m.product in covered for m in matches):
+            gaps.setdefault(matches[0].component, gap(path, ctx, matches[0].component))
+    return list(gaps.values())

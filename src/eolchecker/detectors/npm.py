@@ -1,4 +1,4 @@
-"""Angular, AngularJS, React, Next.js and Node.js from package.json and friends."""
+"""Every dependency in package.json, plus Node.js from engines, .nvmrc and .node-version."""
 from __future__ import annotations
 
 import json
@@ -7,17 +7,12 @@ from pathlib import Path
 
 import yaml
 
-from ..models import DetectResult, finding
+from ..catalog import dep_key
+from ..models import DetectResult, Dependency, finding
 from ..versions import is_range, lowest, normalise
 from . import Context
-from ._util import dirs_up, gap, parse_error, read_text, rel
+from ._util import dirs_up, gap, gaps_for, parse_error, read_text, rel
 
-PACKAGES = {
-    "@angular/core": "Angular",
-    "angular": "AngularJS",
-    "react": "React",
-    "next": "Next.js",
-}
 LOCK_FILES = ("package-lock.json", "yarn.lock", "pnpm-lock.yaml")
 DEP_SECTIONS = ("dependencies", "devDependencies", "peerDependencies")
 
@@ -37,7 +32,7 @@ class NpmDetector:
         version = normalise(first) if re.match(r"^[vV]?\d", first) else None
         if version is None:
             return DetectResult(unrecognised=[gap(path, ctx, "Node.js")])
-        return DetectResult(findings=[finding("Node.js", version, version, rel(path, ctx))])
+        return DetectResult(findings=[finding("Node.js", version, version, rel(path, ctx), origin=path.name)])
 
     def _package_json(self, path: Path, ctx: Context) -> DetectResult:
         try:
@@ -50,20 +45,15 @@ class NpmDetector:
         result = DetectResult()
         source = rel(path, ctx)
         lock = _Lock.find(path.parent, ctx.root)
-        for name, component in PACKAGES.items():
-            declared = _declared(data, name)
-            if declared is None:
+        for section in DEP_SECTIONS:
+            deps = data.get(section)
+            if not isinstance(deps, dict):
                 continue
-            locked = lock.version(name, declared, path.parent) if lock else None
-            if locked:
-                result.findings.append(finding(component, locked, locked, source))
-                continue
-            version = lowest(declared)
-            if version is None:
-                result.unrecognised.append(gap(path, ctx, component))
-                continue
-            display = declared if is_range(declared) else version
-            result.findings.append(finding(component, version, display, source))
+            for name, declared in deps.items():
+                if not isinstance(declared, str):
+                    continue
+                result.dependencies.append(_dependency(name, declared, lock, path, source))
+        result.unrecognised.extend(gaps_for(result.dependencies, ctx.index, path, ctx))
 
         engines = data.get("engines")
         node = engines.get("node") if isinstance(engines, dict) else None
@@ -72,16 +62,20 @@ class NpmDetector:
             if version is None:
                 result.unrecognised.append(gap(path, ctx, "Node.js"))
             else:
-                result.findings.append(finding("Node.js", version, node if is_range(node) else version, source))
+                result.findings.append(finding("Node.js", version, node if is_range(node) else version, source,
+                                                origin="engines.node"))
         return result
 
 
-def _declared(data: dict, name: str) -> str | None:
-    for section in DEP_SECTIONS:
-        deps = data.get(section)
-        if isinstance(deps, dict) and isinstance(deps.get(name), str):
-            return deps[name]
-    return None
+def _dependency(name: str, declared: str, lock: _Lock | None, path: Path, source: Path) -> Dependency:
+    key = dep_key("npm", name)
+    locked = lock.version(name, declared, path.parent) if lock else None
+    if locked:
+        return Dependency(key, name, locked, locked, source)
+    version = lowest(declared)
+    if version is None:
+        return Dependency(key, name, None, None, source)
+    return Dependency(key, name, version, declared if is_range(declared) else version, source)
 
 
 class _Lock:
