@@ -16,7 +16,8 @@ Runner = Callable[[list[str], Path], subprocess.CompletedProcess]
 
 
 def run_subprocess(cmd: list[str], cwd: Path) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=TIMEOUT_SECONDS)
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, errors="replace",
+                          timeout=TIMEOUT_SECONDS)
 
 
 def _is_windows() -> bool:

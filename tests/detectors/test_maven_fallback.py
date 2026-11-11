@@ -148,6 +148,14 @@ def test_non_windows_ignores_mvnw_cmd_and_non_executable_mvnw(write_files, monke
     assert maven_fallback.find_maven(root / "api" / "pom.xml", root) is None
 
 
+def test_run_subprocess_replaces_undecodable_output(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(maven_fallback.subprocess, "run", lambda cmd, **kw: seen.update(kw))
+    maven_fallback.run_subprocess(["mvn"], Path("."))
+    assert seen["errors"] == "replace"
+    assert seen["text"] is True
+
+
 def test_no_gaps_no_run(write_files, monkeypatch):
     with_mvn(monkeypatch)
     root = write_files({"api/pom.xml": COMPLETE_POM})

@@ -189,6 +189,14 @@ def test_broken_config_warns_and_uses_default(tmp_path, monkeypatch):
     assert len(warnings) == 1
 
 
+def test_unknown_user_in_cache_dir_warns_and_uses_default(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache, "checkout_root", lambda: tmp_path)
+    (tmp_path / "eolchecker.toml").write_text('cache_dir = "~nosuchuser_zz9/x"\n')
+    warnings = []
+    assert default_cache_dir(warnings.append) == tmp_path / ".cache"
+    assert len(warnings) == 1
+
+
 def test_checkout_root_finds_this_repo():
     assert (cache.checkout_root() / "pyproject.toml").exists()
 

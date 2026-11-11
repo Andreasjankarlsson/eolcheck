@@ -289,5 +289,7 @@ swappable with fakes.
   dependency. Without this Spring Cloud could never produce a row.
 - **Table layout.** The Dependencies column wraps (at the commas) and keeps a
   minimum width of 18 characters while there is room. On narrow terminals End
-  of support and Latest give way first; Component, Status and the file path in
-  Found in are never broken, and Version only wraps at its space.
+  of support and Latest give way first. At 100+ columns Component, Status and
+  the path in Found in stay whole, and Version only wraps at its space. On
+  narrower terminals or with long paths every column may wrap, but nothing is
+  cut off.

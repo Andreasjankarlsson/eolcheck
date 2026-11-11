@@ -48,7 +48,7 @@ def default_cache_dir(warn: Callable[[str], None]) -> Path:
                     raise ValueError("cache_dir must be a string")
                 path = Path(value).expanduser()
                 return path if path.is_absolute() else root / path
-        except (OSError, ValueError) as exc:  # TOMLDecodeError is a ValueError
+        except (OSError, ValueError, RuntimeError) as exc:  # RuntimeError: ~nosuchuser  # TOMLDecodeError is a ValueError
             warn(f"Ignoring {config}: {exc}")
     return root / ".cache"
 

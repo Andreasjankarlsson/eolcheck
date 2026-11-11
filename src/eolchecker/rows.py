@@ -34,10 +34,10 @@ def _match(version: str, releases: list[Release]) -> Release | None:
 
 
 def _newest_latest(releases: list[Release]) -> str:
-    if not releases:
-        return DASH
     """The highest version across all cycles (not the cycle released last: maintenance
     branches such as Log4j 2.12 keep getting releases after newer cycles)."""
+    if not releases:
+        return DASH
     return max((_tidy(r.latest or r.name) for r in releases), key=_vkey)
 
 
