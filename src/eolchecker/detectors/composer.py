@@ -1,19 +1,14 @@
-"""PHP, Laravel and Symfony from composer.json / composer.lock."""
+"""PHP, plus every package in composer.json (versions from composer.lock when present)."""
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from ..models import DetectResult, finding
+from ..catalog import dep_key
+from ..models import DetectResult, Dependency, finding
 from ..versions import is_range, lowest, normalise
 from . import Context
-from ._util import gap, parse_error, read_text, rel
-
-# Component -> package names to look for, first match wins.
-PACKAGES = {
-    "Laravel": ("laravel/framework",),
-    "Symfony": ("symfony/framework-bundle", "symfony/http-kernel"),
-}
+from ._util import gap, gaps_for, parse_error, read_text, rel
 
 
 class ComposerDetector:
@@ -36,26 +31,34 @@ class ComposerDetector:
         platform = ((data.get("config") or {}).get("platform") or {}).get("php")
         php = platform if isinstance(platform, str) else require.get("php")
         if isinstance(php, str):
-            _add(result, "PHP", php, None, path, ctx, source)
+            origin = "config.platform.php" if isinstance(platform, str) else "require.php"
+            version = lowest(php)
+            if version is None:
+                result.unrecognised.append(gap(path, ctx, "PHP"))
+            else:
+                result.findings.append(finding("PHP", version, php if is_range(php) else version, source,
+                                                origin=origin))
 
-        for component, names in PACKAGES.items():
-            for name in names:
-                if isinstance(require.get(name), str):
-                    _add(result, component, require[name], locked.get(name), path, ctx, source)
-                    break
+        for section in ("require", "require-dev"):
+            packages = data.get(section)
+            if not isinstance(packages, dict):
+                continue
+            for name, declared in packages.items():
+                if "/" not in name or not isinstance(declared, str):
+                    continue
+                result.dependencies.append(_dependency(name, declared, locked.get(name), source))
+        result.unrecognised.extend(gaps_for(result.dependencies, ctx.index, path, ctx))
         return result
 
 
-def _add(result: DetectResult, component: str, declared: str, locked: str | None,
-         path: Path, ctx: Context, source: Path) -> None:
+def _dependency(name: str, declared: str, locked: str | None, source: Path) -> Dependency:
+    key = dep_key("composer", name)
     if locked:
-        result.findings.append(finding(component, locked, locked, source))
-        return
+        return Dependency(key, name, locked, locked, source)
     version = lowest(declared)
     if version is None:
-        result.unrecognised.append(gap(path, ctx, component))
-        return
-    result.findings.append(finding(component, version, declared if is_range(declared) else version, source))
+        return Dependency(key, name, None, None, source)
+    return Dependency(key, name, version, declared if is_range(declared) else version, source)
 
 
 def _locked_versions(lock: Path) -> dict[str, str]:
