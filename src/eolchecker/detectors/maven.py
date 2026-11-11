@@ -4,13 +4,14 @@ from __future__ import annotations
 import os
 import re
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from ..models import DetectResult, Unrecognised, finding
 from ..versions import normalise
 from . import Context
 from ._util import parse_error, read_text, rel
+from .maven_fallback import Runner, effective_pom, find_maven, run_subprocess
 
 BOOT_GROUP = "org.springframework.boot"
 JAVA_PROPS = ("maven.compiler.release", "maven.compiler.source", "java.version")
@@ -35,6 +36,7 @@ class PomReading:
     has_gaps: bool
     gap_components: set[str] = field(default_factory=set)
     props: dict[str, str] = field(default_factory=dict)  # merged properties, for child poms
+    gaps: list[tuple[str, Unrecognised]] = field(default_factory=list)  # (component, gap)
 
 
 @dataclass(frozen=True)
@@ -62,11 +64,12 @@ def read_pom(pom_xml: str, source: Path, parent_props: dict[str, str], *, check_
 
     coords = _coords(root)
     result = DetectResult()
-    gaps: set[str] = set()
+    gaps: list[tuple[str, Unrecognised]] = []
 
     def add_gap(component: str, reason: str) -> None:
-        result.unrecognised.append(Unrecognised(source, reason))
-        gaps.add(component)
+        gap_entry = Unrecognised(source, reason)
+        result.unrecognised.append(gap_entry)
+        gaps.append((component, gap_entry))
 
     def add(component: str, raw: str, parse=normalise) -> None:
         value, missing = _resolve(raw, props)
@@ -116,10 +119,14 @@ def read_pom(pom_xml: str, source: Path, parent_props: dict[str, str], *, check_
     if tomcat_raw:
         add("Apache Tomcat", tomcat_raw)
 
-    return PomReading(result, bool(gaps), gaps, props)
+    return PomReading(result, bool(gaps), {c for c, _ in gaps}, props, gaps)
 
 
 class MavenDetector:
+    def __init__(self, runner: Runner | None = None, tmp_dir: Path | None = None):
+        self._runner = runner or run_subprocess
+        self._tmp_dir = tmp_dir
+
     def applies_to(self, path: Path) -> bool:
         return path.name == "pom.xml"
 
@@ -133,7 +140,49 @@ class MavenDetector:
         return self._after_direct_read(path, ctx, reading)
 
     def _after_direct_read(self, path: Path, ctx: Context, reading: PomReading) -> DetectResult:
-        return reading.result
+        """If reading the file directly left gaps, ask Maven for the effective pom."""
+        if not reading.has_gaps or not ctx.use_maven:
+            return reading.result
+        if find_maven(path, ctx.root) is None:
+            return _with_suffix(reading, " (Maven not found)")
+        text = effective_pom(path, ctx.root, self._runner, self._tmp_dir)
+        effective = _read_effective(text, rel(path, ctx)) if text else None
+        if effective is None:
+            return _with_suffix(reading, " (Maven fallback failed)")
+
+        found = {}
+        for f in effective.result.findings:
+            found.setdefault(f.component, replace(f, via_maven=True))
+        result = DetectResult(findings=list(reading.result.findings))
+        for component, gap_entry in reading.gaps:
+            if component in found:
+                result.findings.append(found.pop(component))
+            else:
+                result.unrecognised.append(gap_entry)
+        return result
+
+
+def _read_effective(text: str, source: Path) -> PomReading | None:
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return None
+    if _local(root.tag) == "projects":  # multi-module output: take the first project
+        projects = _kids(root, "project")
+        if not projects:
+            return None
+        text = ET.tostring(projects[0], encoding="unicode")
+    try:
+        return read_pom(text, source, {}, check_java=True)
+    except ET.ParseError:
+        return None
+
+
+def _with_suffix(reading: PomReading, suffix: str) -> DetectResult:
+    return DetectResult(
+        findings=list(reading.result.findings),
+        unrecognised=[Unrecognised(u.source, u.reason + suffix) for _, u in reading.gaps],
+    )
 
 
 def _parent_chain(path: Path, text: str, root: Path, depth: int = 0) -> tuple[dict[str, str], dict[str, str]]:
