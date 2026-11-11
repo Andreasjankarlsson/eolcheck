@@ -41,6 +41,19 @@ def test_no_eol_date():
     assert (row.status, row.end_of_support, row.latest) == ("no EOL date", "—", "19.2.0")
 
 
+def test_latest_drops_build_metadata():
+    data = {"eclipse-temurin": [Release("27", "2026-09-15", False, "2027-03-23", "27.0.1.0.2+1"),
+                                Release("17", "2021-09-14", False, "2029-09-30", "17.0.13+11")]}
+    [row] = build_rows([finding("Java", "17", "17", Path("pom.xml"))], FakeClient(data))
+    assert row.latest == "27.0.1"
+
+
+def test_latest_keeps_normal_versions():
+    data = {"dotnetfx": [Release("4.8.1", "2022-08-09", False, None, "4.8.1")]}
+    [row] = build_rows([finding(".NET Framework", "4.8", "net48", Path("a.csproj"))], FakeClient(data))
+    assert row.latest == "4.8.1"
+
+
 def test_unknown_cycle():
     [row] = build_rows([finding("Spring Boot", "0.9", "0.9", Path("pom.xml"))], FakeClient({"spring-boot": BOOT}))
     assert (row.status, row.end_of_support) == ("unknown", "—")

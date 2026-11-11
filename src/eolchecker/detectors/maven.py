@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -146,6 +147,7 @@ class MavenDetector:
             return reading.result
         if find_maven(path, ctx.root) is None:
             return _with_suffix(reading, " (Maven not found)")
+        print(f"Asking Maven about {rel(path, ctx)}…", file=sys.stderr, flush=True)
         text = effective_pom(path, ctx.root, self._runner, self._tmp_dir)
         effective = _read_effective(text, rel(path, ctx)) if text else None
         if effective is None:

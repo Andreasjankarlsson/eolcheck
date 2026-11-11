@@ -25,8 +25,11 @@ def main(argv: list[str] | None = None, client=None, detectors=None) -> int:
     args = parser.parse_args(argv)
 
     root = Path(args.path).expanduser()
-    if not root.is_dir():
+    if not root.exists():
         print(f"Path not found: {args.path}", file=sys.stderr)
+        return 2
+    if not root.is_dir():
+        print(f"Not a folder: {args.path}", file=sys.stderr)
         return 2
     root = root.resolve()
 

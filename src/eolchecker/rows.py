@@ -1,6 +1,7 @@
 """Turn findings into table rows using endoflife.date data."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -38,7 +39,15 @@ def _newest_latest(releases: list[Release]) -> str:
     if not releases:
         return DASH
     newest = max(releases, key=lambda r: r.release_date)
-    return newest.latest or newest.name
+    return _tidy(newest.latest or newest.name)
+
+
+def _tidy(version: str) -> str:
+    """'27.0.1.0.2+1' -> '27.0.1': drop build metadata and anything past major.minor.patch."""
+    core = version.split("+")[0]
+    if re.fullmatch(r"\d+(?:\.\d+)*", core):
+        return ".".join(core.split(".")[:3])
+    return version
 
 
 def build_rows(findings: list[Finding], client: ReleaseSource) -> list[Row]:

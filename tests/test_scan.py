@@ -34,6 +34,20 @@ def test_detector_exception_becomes_unrecognised(write_files):
     assert result.unrecognised == [Unrecognised(Path("bad.json"), "couldn't parse bad.json")]
 
 
+def test_duplicate_unrecognised_lines_are_merged(write_files):
+    class Twice:
+        def applies_to(self, path):
+            return True
+
+        def detect(self, path, ctx):
+            gap_entry = Unrecognised(Path("shared/Directory.Build.props"), "couldn't parse Directory.Build.props")
+            return DetectResult(unrecognised=[gap_entry, gap_entry])
+
+    root = write_files({"a.json": "{}", "b.json": "{}"})
+    assert scan(root, Context(root), [Twice()]).unrecognised == [
+        Unrecognised(Path("shared/Directory.Build.props"), "couldn't parse Directory.Build.props")]
+
+
 def test_scan_collects_findings_with_relative_paths(write_files):
     root = write_files({"web/package.json": "{}", "README.md": ""})
     result = scan(root, Context(root), [FakeDetector()])

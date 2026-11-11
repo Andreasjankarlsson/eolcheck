@@ -49,5 +49,5 @@ class EolClient:
                 )
                 for r in raw
             ]
-        except (ValueError, KeyError, TypeError) as exc:
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
             raise ApiUnavailable(f"unexpected response for {product}") from exc

@@ -64,6 +64,13 @@ def test_fallback_fills_gaps(write_files, monkeypatch):
     assert result.unrecognised == []
 
 
+def test_prints_progress_while_maven_runs(write_files, monkeypatch, capsys):
+    with_mvn(monkeypatch)
+    root = write_files({"api/pom.xml": COMPANY_POM})
+    detect(root, FakeRunner())
+    assert "Asking Maven about api/pom.xml" in capsys.readouterr().err
+
+
 def test_no_maven_flag_skips(write_files, monkeypatch):
     with_mvn(monkeypatch)
     root = write_files({"api/pom.xml": COMPANY_POM})

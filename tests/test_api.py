@@ -44,6 +44,12 @@ def test_bad_json_raises():
         client_for(lambda req: httpx.Response(200, text="not json")).releases("spring-boot")
 
 
+def test_odd_shaped_release_raises():
+    payload = {"result": {"releases": [{"name": "3.1", "isEol": True, "latest": "3.1.12"}]}}
+    with pytest.raises(ApiUnavailable):
+        client_for(lambda req: httpx.Response(200, json=payload)).releases("spring-boot")
+
+
 def test_follows_redirect():
     def handler(req):
         if req.url.path.endswith("/old-name"):

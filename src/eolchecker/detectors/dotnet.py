@@ -43,21 +43,22 @@ class DotnetDetector:
         except ET.ParseError:
             return parse_error(path, ctx)
 
+        result = DetectResult()
         props: dict[str, str] = {}
         for props_file in reversed(_props_chain(path.parent, ctx.root)):
             try:
                 props.update(_properties(props_file))
             except ET.ParseError:
-                continue
+                result.unrecognised.append(Unrecognised(rel(props_file, ctx), f"couldn't parse {PROPS}"))
         props.update(project_props)
 
         raw = props.get("TargetFrameworks") or props.get("TargetFramework") or props.get("TargetFrameworkVersion")
         source = rel(path, ctx)
         if not raw:
-            return DetectResult(unrecognised=[Unrecognised(source, NO_TARGET)])
+            result.unrecognised.append(Unrecognised(source, NO_TARGET))
+            return result
         raw = _resolve(raw, props)
 
-        result = DetectResult()
         for tfm in (t.strip() for t in raw.split(";")):
             if not tfm or tfm.lower().startswith("netstandard"):
                 continue

@@ -121,6 +121,17 @@ def test_broken_xml_unrecognised(write_files):
     assert run(root, "Api.csproj").unrecognised == [Unrecognised(Path("Api.csproj"), "couldn't parse Api.csproj")]
 
 
+def test_broken_props_is_named(write_files):
+    root = write_files({
+        "src/Directory.Build.props": "<Project><PropertyGroup>",
+        "src/A/A.csproj": '<Project Sdk="Microsoft.NET.Sdk"></Project>',
+    })
+    assert run(root, "src/A/A.csproj").unrecognised == [
+        Unrecognised(Path("src/Directory.Build.props"), "couldn't parse Directory.Build.props"),
+        Unrecognised(Path("src/A/A.csproj"), "couldn't read the .NET target framework"),
+    ]
+
+
 def test_bom_csproj(write_files):
     root = write_files({"A.csproj": "﻿" + sdk_project("<TargetFramework>net8.0</TargetFramework>")})
     [f] = run(root, "A.csproj").findings

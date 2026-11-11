@@ -26,6 +26,8 @@ def lowest(raw: str) -> str | None:
     best: tuple[int, ...] | None = None
     best_text: str | None = None
     for alt in re.split(r"\|\|?", text):
+        if alt.strip().startswith("<"):
+            continue  # only an upper limit ("<20"): says nothing about the lowest version
         m = _NUMERIC.search(alt)
         if not m:
             continue

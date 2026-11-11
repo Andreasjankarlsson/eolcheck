@@ -25,6 +25,7 @@ def test_is_range(raw, expected):
     ("^8.0|^7.4", "7.4"), ("^8.0 || ^7.4", "7.4"), (">=18 <21", "18"),
     ("16.2.0", "16.2.0"), ("*", None), ("latest", None),
     ("workspace:*", None), ("git+https://github.com/x/y.git", None),
+    ("<20", None), ("<=18.0", None), ("<16 || >=18", "18"),
 ])
 def test_lowest(raw, expected):
     assert lowest(raw) == expected

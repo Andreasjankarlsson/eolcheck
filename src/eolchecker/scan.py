@@ -29,4 +29,6 @@ def scan(root: Path, ctx: Context, detectors: Sequence[Detector] | None = None) 
                 result.extend(det.detect(path, ctx))
             except Exception:
                 result.unrecognised.append(Unrecognised(path.relative_to(root), f"couldn't parse {path.name}"))
+    # The same gap can be reported from several files (e.g. a shared broken props file); list it once.
+    result.unrecognised = list(dict.fromkeys(result.unrecognised))
     return result

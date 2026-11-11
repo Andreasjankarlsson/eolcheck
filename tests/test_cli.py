@@ -49,6 +49,13 @@ def test_missing_path_exit_2(capsys):
     assert "Path not found: /nope" in capsys.readouterr().err
 
 
+def test_file_instead_of_folder_exit_2(write_files, capsys):
+    root = repo(write_files)
+    target = root / "frontend" / "package.json"
+    assert main([str(target)], client=FakeClient(), detectors=[]) == 2
+    assert f"Not a folder: {target}" in capsys.readouterr().err
+
+
 def test_api_down_exit_1(write_files, capsys):
     root = repo(write_files)
     assert main([str(root)], client=DownClient(), detectors=[StubDetector(ANGULAR)]) == 1
