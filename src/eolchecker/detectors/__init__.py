@@ -28,7 +28,9 @@ class Detector(Protocol):
 DETECTORS: list[Detector] = []
 
 from .composer import ComposerDetector  # noqa: E402
+from .dotnet import DotnetDetector  # noqa: E402
 from .npm import NpmDetector  # noqa: E402
 
 DETECTORS.append(NpmDetector())
 DETECTORS.append(ComposerDetector())
+DETECTORS.append(DotnetDetector())
