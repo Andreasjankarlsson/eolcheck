@@ -23,6 +23,7 @@ It is used occasionally, by one person, against one repo at a time that is alrea
 - Checking every dependency. Only the frameworks listed below.
 - Security/vulnerability scanning.
 - Reading Dockerfiles or CI configs for runtime versions. Build files only (decided with the owner).
+- Gradle projects. The owner's projects use Maven only (decided with the owner).
 - Cloning repos, taking URLs, or scanning many repos at once.
 - Warnings or thresholds ("ending in 6 months"). The owner wants the info only, not judgements. Status is just *supported* or *end of life*.
 - CI integration, JSON output, config files. (Not ruled out forever; just not now.)
@@ -49,9 +50,9 @@ All slugs verified to exist on endoflife.date on 2026-11-11.
 
 | # | Component | endoflife.date slug | Where the version comes from |
 |---|-----------|--------------------|------------------------------|
-| 1 | Spring Boot | `spring-boot` | Maven: `spring-boot-starter-parent` parent version, or `spring-boot-dependencies` BOM import. Gradle: `org.springframework.boot` plugin version. |
+| 1 | Spring Boot | `spring-boot` | Maven: `spring-boot-starter-parent` parent version, or `spring-boot-dependencies` BOM import. |
 | 2 | Spring Framework | `spring-framework` | Explicit `org.springframework:spring-*` dependency version or `spring-framework-bom`. |
-| 3 | Java | `eclipse-temurin` | Maven: `maven.compiler.release` / `.source` / `java.version` property, or compiler plugin config. Gradle: `toolchain.languageVersion`, `sourceCompatibility`. Files: `.java-version`, `.sdkmanrc`. |
+| 3 | Java | `eclipse-temurin` | Maven: `maven.compiler.release` / `.source` / `java.version` property, or compiler plugin config. Files: `.java-version`, `.sdkmanrc`. |
 | 4 | Hibernate ORM | `hibernate-orm` | Explicit `org.hibernate(.orm):hibernate-core` version. |
 | 5 | Apache Tomcat | `tomcat` | Explicit `org.apache.tomcat.embed:tomcat-embed-core` or `tomcat.version` property. |
 | 6 | .NET (Core / 5+) | `dotnet` | `.csproj`/`.fsproj`/`.vbproj` `<TargetFramework(s)>` like `net8.0`, `netcoreapp3.1`; `global.json` `sdk.version`. |
@@ -65,7 +66,7 @@ All slugs verified to exist on endoflife.date on 2026-11-11.
 | 14 | Laravel | `laravel` | `composer.json` / `composer.lock` `laravel/framework`. |
 | 15 | Symfony | `symfony` | `composer.json` / `composer.lock` `symfony/framework-bundle` (fallback `symfony/http-kernel`). |
 
-Easy next additions if wanted: Vue, jQuery, Drupal, WordPress, Quarkus, Kotlin, Gradle, Maven, Nuxt, NestJS.
+Easy next additions if wanted: Vue, jQuery, Drupal, WordPress, Quarkus, Kotlin, Maven, Nuxt, NestJS.
 
 ## Expected output
 
@@ -82,7 +83,7 @@ customer-portal
   Node.js       18        frontend/.nvmrc         2025-04-30       25.2.0    END OF LIFE
   .NET          8.0       api/Api.csproj          2026-11-10       10.0.0    END OF LIFE
 
-  Not recognised: tools/build.gradle.kts (couldn't read the Spring Boot version)
+  Not recognised: tools/pom.xml (couldn't read the Spring Boot version)
 ```
 
 (Versions/dates above are illustrative.)
@@ -98,7 +99,6 @@ customer-portal
 - For a declared range (`^16.2.0`, `~3.1`, `>=18`), use the lowest version it allows.
 - Resolve simple Maven `${property}` references from the same `pom.xml`, and the parent pom if it's inside the repo. Don't fetch remote parents.
 - **Maven fallback.** If reading a `pom.xml` directly leaves a gap (a version inherited from a parent outside the repo, or an unresolved property), and Maven is available (`./mvnw` in the repo, else `mvn` on the PATH), run `help:effective-pom` on that module and read the versions from its output. Mark those rows as resolved via Maven. If Maven isn't available or the command fails (no network, private repo needing credentials), fall back to "Not recognised" with the reason. A `--no-maven` flag skips this step. It's slower, and it downloads parent poms.
-- Gradle files are code; read them on a best-effort basis with pattern matching (Groovy and Kotlin DSL, plus `gradle/libs.versions.toml`). Whatever can't be read goes in "Not recognised".
 
 **API.** Use the endoflife.date **v1 API** (spec: https://endoflife.date/docs/api/v1/openapi.yml), base URL `https://endoflife.date/api/v1`. One `GET /products/{slug}` per product found. It returns `result.releases[]`, each with `name` (the cycle, e.g. `3.1`), `releaseDate`, `isEol`, `eolFrom`, and `latest.name`. Follow 301 redirects (products get renamed). Treat 404 as "product unknown" and 429/5xx as "couldn't fetch".
 
@@ -143,4 +143,4 @@ customer-portal
 - The example Latest column shows full versions, e.g. `4.0.1`.
 - .NET multi-target projects give one row per target; `netstandard` is ignored.
 - Status comes from the API's `isEol` flag rather than our own date comparison.
-- The Maven fallback runs automatically, only when needed, with `--no-maven` to turn it off. There's no equivalent for Gradle yet: running Gradle executes the build scripts and is slow. It's an easy later addition.
+- The Maven fallback runs automatically, only when needed, with `--no-maven` to turn it off.

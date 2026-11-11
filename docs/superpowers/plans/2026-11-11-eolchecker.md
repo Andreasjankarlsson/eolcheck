@@ -4,7 +4,7 @@
 
 **Goal:** A Python CLI, `eolchecker <folder>`, that finds the major frameworks/runtimes in a locally cloned repo and prints their version, end-of-support date, newest release and status, using the endoflife.date v1 API.
 
-**Architecture:** A scanner walks the folder and hands each file to small, self-contained detectors (npm, composer, .NET, Maven, Gradle/Java files). Detectors return `Finding`s and `Unrecognised` gaps. A client fetches each endoflife.date product once, a matcher turns findings into table rows, and a `rich` table prints them. Adding a framework means adding to one detector.
+**Architecture:** A scanner walks the folder and hands each file to small, self-contained detectors (npm, composer, .NET, Maven, Java version files). Detectors return `Finding`s and `Unrecognised` gaps. A client fetches each endoflife.date product once, a matcher turns findings into table rows, and a `rich` table prints them. Adding a framework means adding to one detector.
 
 **Tech Stack:** Python 3.11+, `uv`, `httpx`, `rich`, `pyyaml` (pnpm lock files), `pytest`. Standard-library `xml.etree.ElementTree`, `json`, `tomllib`, `argparse`, `subprocess`.
 
@@ -20,7 +20,7 @@
 - Table columns exactly: `Component`, `Version`, `Found in`, `End of support`, `Latest`, `Status`. Null `eolFrom` shows `—`.
 - "Not recognised" lists only files where one of the 15 components is clearly in use but no version could be determined; files using none of them are skipped silently.
 - Exit codes: path missing → 2; endoflife.date unreachable → 1; otherwise 0 (including "No supported frameworks found in <path>").
-- `netstandard*` targets are ignored. Dockerfiles/CI configs are not read.
+- `netstandard*` targets are ignored. Gradle build files, Dockerfiles and CI configs are not read.
 - Do not modify `.idea/` or `eolchecker.iml`.
 - The 15 components and their slugs:
 
@@ -74,13 +74,12 @@ src/eolchecker/
     dotnet.py                        # *.csproj/*.fsproj/*.vbproj, Directory.Build.props, global.json
     maven.py                         # pom.xml parsing, properties, in-repo parents
     maven_fallback.py                # mvn help:effective-pom runner
-    gradle.py                        # build.gradle(.kts), libs.versions.toml
     java_files.py                    # .java-version, .sdkmanrc
 tests/
   conftest.py                        # write_files helper fixture
   test_versions.py  test_api.py  test_rows.py  test_scan.py  test_cli.py
   detectors/test_npm.py  test_composer.py  test_dotnet.py  test_maven.py
-  detectors/test_maven_fallback.py  test_gradle.py  test_java_files.py
+  detectors/test_maven_fallback.py  test_java_files.py
 ```
 
 Tests build their sample repos inside `tmp_path` with the `write_files` fixture. There are no checked-in fixture folders.
@@ -316,7 +315,7 @@ git commit -m "feat: endoflife.date client and row matching"
 - `test_missing_path_exit_2`: `main(["/nope"]) == 2`, and stderr contains `Path not found: /nope`.
 - `test_api_down_exit_1`: the client raises `ApiUnavailable("timed out")` → 1, and stderr contains `Couldn't fetch end-of-life dates from endoflife.date: timed out`.
 - `test_nothing_found_exit_0`: with no detectors → 0, and the output contains `No supported frameworks found in`.
-- `test_not_recognised_section`: a detector that returns `Unrecognised(Path("tools/build.gradle.kts"), "couldn't read the Spring Boot version")` → the output contains `Not recognised:` and that line.
+- `test_not_recognised_section`: a detector that returns `Unrecognised(Path("tools/pom.xml"), "couldn't read the Spring Boot version")` → the output contains `Not recognised:` and that line.
 - `test_no_maven_flag`: the fake detector records `ctx.use_maven`; `main([str(tmp_path), "--no-maven"], ...)` → it recorded `False`.
 
 Render with `Console(width=200)` in `main` when stdout isn't a terminal, so tests don't wrap columns.
@@ -535,46 +534,26 @@ git commit -m "feat: scanner, report and CLI"
 
 ---
 
-### Task 9: Gradle and Java version files
+### Task 9: Java version files
 
 **Files:**
-- Create: `src/eolchecker/detectors/gradle.py`, `src/eolchecker/detectors/java_files.py`
-- Modify: `src/eolchecker/detectors/__init__.py` (register both)
-- Test: `tests/detectors/test_gradle.py`, `tests/detectors/test_java_files.py`
+- Create: `src/eolchecker/detectors/java_files.py`
+- Modify: `src/eolchecker/detectors/__init__.py` (register)
+- Test: `tests/detectors/test_java_files.py`
 
 **Interfaces:**
 - Consumes: `java_version` (Task 7).
-- Produces:
-  - `class GradleDetector` applies to `build.gradle` and `build.gradle.kts`. It reads `gradle/libs.versions.toml` (via `tomllib`) from the nearest ancestor up to `ctx.root` that has one. Regex patterns, Groovy and Kotlin syntax:
-    - **Spring Boot:**
-      - `id 'org.springframework.boot' version '3.2.0'` / `id("org.springframework.boot") version "3.2.0"`
-      - `org.springframework.boot:spring-boot-gradle-plugin:3.2.0`
-      - `springBootVersion = '3.2.0'`
-      - `alias(libs.plugins.spring.boot)` resolved through the toml `[plugins]` entry (`version` or `version.ref` into `[versions]`)
+- Produces: `class JavaFilesDetector`, which applies to:
+  - `.java-version`: the first line, e.g. `17.0.9` → Java `17`, display `17.0.9`.
+  - `.sdkmanrc`: the `java=21.0.2-tem` line → Java `21`, display `21.0.2-tem`.
 
-      Boot clearly in use (`org.springframework.boot` appears) but no version → gap `couldn't read the Spring Boot version`.
-    - **Java:**
-      - `JavaLanguageVersion.of(17)`
-      - `jvmToolchain(17)`
-      - `sourceCompatibility = '17'` / `= JavaVersion.VERSION_17` / `VERSION_1_8`
-    - **Hibernate, Tomcat, Spring Framework:** `"group:artifact:version"` strings for the same coordinates as Task 7, and toml `[libraries]` entries with `module`/`group`+`name` and `version`/`version.ref`.
-    - **Java gap:** reported only when the file applies the `java`, `java-library`, `application` or `org.springframework.boot` plugin, and no build file in an ancestor dir (up to `ctx.root`) states a Java version.
-  - `class JavaFilesDetector` applies to `.java-version` (first line, e.g. `17.0.9` → Java `17`, display `17.0.9`) and `.sdkmanrc` (the `java=21.0.2-tem` line → Java `21`, display `21.0.2-tem`). Unreadable → gap `couldn't read the Java version`.
+  A file with a version that can't be read → gap `couldn't read the Java version`. A `.sdkmanrc` with no `java=` line → nothing.
 
-- [ ] **Step 1: Write failing tests**
-- `test_kotlin_dsl_plugin_and_toolchain`: `plugins { id("org.springframework.boot") version "3.2.0" }` + `java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }` → Spring Boot `3.2.0`, Java `21`.
-- `test_groovy_source_compat`: `sourceCompatibility = JavaVersion.VERSION_1_8` → Java `8`.
-- `test_version_catalog_alias`: `alias(libs.plugins.spring.boot)`, toml `[versions] springBoot = "3.3.1"`, `[plugins] spring-boot = { id = "org.springframework.boot", version.ref = "springBoot" }` → `3.3.1`.
-- `test_hibernate_coordinate`: `implementation("org.hibernate.orm:hibernate-core:6.5.2.Final")` → Hibernate `6.5.2`.
-- `test_boot_without_version_gap`: `id("org.springframework.boot")` with no version and no catalog → gap.
-- `test_subproject_inherits_java_from_root`: the root `build.gradle.kts` has `jvmToolchain(17)`, and `app/build.gradle.kts` applies `java` with no version → no gap for `app`.
-- `test_settings_only_file_silent`: a build file with no plugins and no frameworks → nothing.
-- `test_java_version_file`, `test_sdkmanrc`, and `test_sdkmanrc_without_java_silent` (a `.sdkmanrc` with only `maven=3.9.6` → nothing).
-
-- [ ] **Step 2: Run to verify they fail** — `uv run pytest tests/detectors/test_gradle.py tests/detectors/test_java_files.py -v` → FAIL.
-- [ ] **Step 3: Implement and register both.**
+- [ ] **Step 1: Write failing tests**: `test_java_version_file`, `test_sdkmanrc`, `test_sdkmanrc_without_java_silent` (only `maven=3.9.6` → nothing), and `test_unreadable_java_version_gap` (`.java-version` containing `system` → gap).
+- [ ] **Step 2: Run to verify they fail** — `uv run pytest tests/detectors/test_java_files.py -v` → FAIL.
+- [ ] **Step 3: Implement and register.**
 - [ ] **Step 4: Run to verify they pass** — `uv run pytest -v` → PASS.
-- [ ] **Step 5: Commit** — `git commit -m "feat: Gradle and Java version file detectors"`
+- [ ] **Step 5: Commit** — `git commit -m "feat: Java version file detector"`
 
 ---
 
