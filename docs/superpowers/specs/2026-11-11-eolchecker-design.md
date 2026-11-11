@@ -52,7 +52,7 @@ All slugs verified to exist on endoflife.date on 2026-11-11.
 |---|-----------|--------------------|------------------------------|
 | 1 | Spring Boot | `spring-boot` | Maven: `spring-boot-starter-parent` parent version, or `spring-boot-dependencies` BOM import. |
 | 2 | Spring Framework | `spring-framework` | Explicit `org.springframework:spring-*` dependency version or `spring-framework-bom`. |
-| 3 | Java | `eclipse-temurin` | Maven: `maven.compiler.release` / `.source` / `java.version` property, or compiler plugin config. Files: `.java-version`, `.sdkmanrc`. |
+| 3 | Java | `eclipse-temurin` | Maven: `maven.compiler.release` / `.source` / `java.version` property, or compiler plugin config. |
 | 4 | Hibernate ORM | `hibernate-orm` | Explicit `org.hibernate(.orm):hibernate-core` version. |
 | 5 | Apache Tomcat | `tomcat` | Explicit `org.apache.tomcat.embed:tomcat-embed-core` or `tomcat.version` property. |
 | 6 | .NET (Core / 5+) | `dotnet` | `.csproj`/`.fsproj`/`.vbproj` `<TargetFramework(s)>` like `net8.0`, `netcoreapp3.1`; `global.json` `sdk.version`. |

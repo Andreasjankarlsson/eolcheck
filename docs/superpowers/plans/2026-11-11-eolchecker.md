@@ -4,7 +4,7 @@
 
 **Goal:** A Python CLI, `eolchecker <folder>`, that finds the major frameworks/runtimes in a locally cloned repo and prints their version, end-of-support date, newest release and status, using the endoflife.date v1 API.
 
-**Architecture:** A scanner walks the folder and hands each file to small, self-contained detectors (npm, composer, .NET, Maven, Java version files). Detectors return `Finding`s and `Unrecognised` gaps. A client fetches each endoflife.date product once, a matcher turns findings into table rows, and a `rich` table prints them. Adding a framework means adding to one detector.
+**Architecture:** A scanner walks the folder and hands each file to small, self-contained detectors (npm, composer, .NET, Maven). Detectors return `Finding`s and `Unrecognised` gaps. A client fetches each endoflife.date product once, a matcher turns findings into table rows, and a `rich` table prints them. Adding a framework means adding to one detector.
 
 **Tech Stack:** Python 3.11+, `uv`, `httpx`, `rich`, `pyyaml` (pnpm lock files), `pytest`. Standard-library `xml.etree.ElementTree`, `json`, `tomllib`, `argparse`, `subprocess`.
 
@@ -74,12 +74,11 @@ src/eolchecker/
     dotnet.py                        # *.csproj/*.fsproj/*.vbproj, Directory.Build.props, global.json
     maven.py                         # pom.xml parsing, properties, in-repo parents
     maven_fallback.py                # mvn help:effective-pom runner
-    java_files.py                    # .java-version, .sdkmanrc
 tests/
   conftest.py                        # write_files helper fixture
   test_versions.py  test_api.py  test_rows.py  test_scan.py  test_cli.py
   detectors/test_npm.py  test_composer.py  test_dotnet.py  test_maven.py
-  detectors/test_maven_fallback.py  test_java_files.py
+  detectors/test_maven_fallback.py
 ```
 
 Tests build their sample repos inside `tmp_path` with the `write_files` fixture. There are no checked-in fixture folders.
@@ -281,7 +280,7 @@ git commit -m "feat: endoflife.date client and row matching"
   class Detector(Protocol):
       def applies_to(self, path: Path) -> bool
       def detect(self, path: Path, ctx: Context) -> DetectResult
-  DETECTORS: list[Detector] = []      # Tasks 4–9 each append their detector here
+  DETECTORS: list[Detector] = []      # Tasks 4–8 each append their detector here
 
   # scan.py
   SKIP_DIRS = frozenset({".git", "node_modules", "vendor", "target", "build", "dist", "bin", "obj", ".idea", ".venv"})
@@ -534,30 +533,7 @@ git commit -m "feat: scanner, report and CLI"
 
 ---
 
-### Task 9: Java version files
-
-**Files:**
-- Create: `src/eolchecker/detectors/java_files.py`
-- Modify: `src/eolchecker/detectors/__init__.py` (register)
-- Test: `tests/detectors/test_java_files.py`
-
-**Interfaces:**
-- Consumes: `java_version` (Task 7).
-- Produces: `class JavaFilesDetector`, which applies to:
-  - `.java-version`: the first line, e.g. `17.0.9` → Java `17`, display `17.0.9`.
-  - `.sdkmanrc`: the `java=21.0.2-tem` line → Java `21`, display `21.0.2-tem`.
-
-  A file with a version that can't be read → gap `couldn't read the Java version`. A `.sdkmanrc` with no `java=` line → nothing.
-
-- [ ] **Step 1: Write failing tests**: `test_java_version_file`, `test_sdkmanrc`, `test_sdkmanrc_without_java_silent` (only `maven=3.9.6` → nothing), and `test_unreadable_java_version_gap` (`.java-version` containing `system` → gap).
-- [ ] **Step 2: Run to verify they fail** — `uv run pytest tests/detectors/test_java_files.py -v` → FAIL.
-- [ ] **Step 3: Implement and register.**
-- [ ] **Step 4: Run to verify they pass** — `uv run pytest -v` → PASS.
-- [ ] **Step 5: Commit** — `git commit -m "feat: Java version file detector"`
-
----
-
-### Task 10: End-to-end check against the real API
+### Task 9: End-to-end check against the real API
 
 **Files:**
 - Test: `tests/test_end_to_end.py` (marked `@pytest.mark.network`, and skipped unless `EOLCHECKER_NETWORK=1`)
