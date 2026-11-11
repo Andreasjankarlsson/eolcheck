@@ -1,0 +1,116 @@
+import json
+
+import pytest
+
+from eolchecker import cache
+from eolchecker.api import ApiUnavailable, FullResponse
+from eolchecker.cache import default_cache_dir, load_catalog
+
+from .fakes import FakeClient, payload, product
+
+BODY = payload(product("php", "PHP"))
+OK = FullResponse(False, BODY, '"e1"')
+
+
+def slugs(products):
+    return [p.slug for p in products]
+
+
+def seed(tmp_path, fetched="2026-11-09T10:00:00+00:00"):
+    (tmp_path / "products-full.json").write_bytes(BODY)
+    (tmp_path / "products-full.meta.json").write_text(
+        json.dumps({"etag": '"e1"', "fetched": fetched}))
+
+
+def test_first_run_downloads_and_writes_cache(tmp_path):
+    client = FakeClient(OK)
+    assert slugs(load_catalog(client, tmp_path, refresh=False, warn=print)) == ["php"]
+    assert client.etags == [None]
+    assert json.loads((tmp_path / "products-full.meta.json").read_text())["etag"] == '"e1"'
+    assert (tmp_path / "products-full.json").read_bytes() == BODY
+
+
+def test_second_run_sends_etag_and_uses_cache_on_304(tmp_path):
+    load_catalog(FakeClient(OK), tmp_path, refresh=False, warn=print)
+    client = FakeClient(FullResponse(True, b"", None))
+    assert slugs(load_catalog(client, tmp_path, refresh=False, warn=print)) == ["php"]
+    assert client.etags == ['"e1"']
+    meta = json.loads((tmp_path / "products-full.meta.json").read_text())
+    assert meta["etag"] == '"e1"'
+
+
+def test_refresh_ignores_etag(tmp_path):
+    seed(tmp_path)
+    client = FakeClient(OK)
+    load_catalog(client, tmp_path, refresh=True, warn=print)
+    assert client.etags == [None]
+
+
+def test_network_down_uses_cache_and_warns(tmp_path):
+    seed(tmp_path)
+    warnings = []
+    result = load_catalog(FakeClient(ApiUnavailable("down")), tmp_path,
+                          refresh=False, warn=warnings.append)
+    assert slugs(result) == ["php"]
+    assert warnings == ["endoflife.date unreachable; using data from 2026-11-09"]
+
+
+def test_network_down_without_cache_raises(tmp_path):
+    with pytest.raises(ApiUnavailable):
+        load_catalog(FakeClient(ApiUnavailable("down")), tmp_path, refresh=False, warn=print)
+
+
+def test_304_without_cache_raises(tmp_path):
+    with pytest.raises(ApiUnavailable):
+        load_catalog(FakeClient(FullResponse(True, b"", None)), tmp_path,
+                     refresh=False, warn=print)
+
+
+def test_corrupt_cache_counts_as_no_cache(tmp_path):
+    (tmp_path / "products-full.json").write_text("{trunc")
+    (tmp_path / "products-full.meta.json").write_text("x")
+    client = FakeClient(OK)
+    assert slugs(load_catalog(client, tmp_path, refresh=False, warn=print)) == ["php"]
+    assert client.etags == [None]
+    assert (tmp_path / "products-full.json").read_bytes() == BODY
+
+
+def test_unwritable_cache_dir_falls_back_to_user_cache(tmp_path, monkeypatch):
+    blocker = tmp_path / "blocker"
+    blocker.write_text("")
+    user = tmp_path / "user"
+    monkeypatch.setattr(cache, "user_cache_dir", lambda: user)
+    warnings = []
+    result = load_catalog(FakeClient(OK), blocker, refresh=False, warn=warnings.append)
+    assert slugs(result) == ["php"]
+    assert (user / "products-full.json").exists()
+    assert len(warnings) == 1 and str(user) in warnings[0]
+
+
+def test_config_cache_dir_relative_to_checkout(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache, "checkout_root", lambda: tmp_path)
+    (tmp_path / "eolchecker.toml").write_text('cache_dir = "data"\n')
+    assert default_cache_dir(print) == tmp_path / "data"
+
+
+def test_default_cache_dir_is_checkout_dot_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache, "checkout_root", lambda: tmp_path)
+    assert default_cache_dir(print) == tmp_path / ".cache"
+
+
+def test_no_checkout_uses_user_cache_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache, "checkout_root", lambda: None)
+    monkeypatch.setattr(cache, "user_cache_dir", lambda: tmp_path / "u")
+    assert default_cache_dir(print) == tmp_path / "u"
+
+
+def test_broken_config_warns_and_uses_default(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache, "checkout_root", lambda: tmp_path)
+    (tmp_path / "eolchecker.toml").write_text("cache_dir = [")
+    warnings = []
+    assert default_cache_dir(warnings.append) == tmp_path / ".cache"
+    assert len(warnings) == 1
+
+
+def test_checkout_root_finds_this_repo():
+    assert (cache.checkout_root() / "pyproject.toml").exists()

@@ -36,3 +36,17 @@ def payload(*products: dict) -> bytes:
 
 def index(*products: dict) -> PurlIndex:
     return PurlIndex(parse_products(payload(*products)))
+
+
+class FakeClient:
+    """Stands in for EolClient.products_full; records the etag of each call."""
+
+    def __init__(self, outcome):
+        self._outcome = outcome
+        self.etags: list[str | None] = []
+
+    def products_full(self, etag: str | None = None):
+        self.etags.append(etag)
+        if isinstance(self._outcome, Exception):
+            raise self._outcome
+        return self._outcome

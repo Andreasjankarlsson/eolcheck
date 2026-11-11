@@ -17,6 +17,13 @@ class Release:
     latest: str | None
 
 
+@dataclass(frozen=True)
+class FullResponse:
+    not_modified: bool
+    body: bytes
+    etag: str | None
+
+
 class ApiUnavailable(Exception):
     """endoflife.date could not be reached or returned something unusable."""
 
@@ -27,20 +34,15 @@ class EolClient:
             follow_redirects=True, timeout=15, headers={"User-Agent": "eolchecker/0.1"}
         )
 
-    def releases(self, product: str) -> list[Release] | None:
-        """All release cycles for a product, or None if endoflife.date doesn't know it."""
+    def products_full(self, etag: str | None = None) -> FullResponse:
+        """Every product with its releases; not_modified when `etag` is still current."""
+        headers = {"If-None-Match": etag} if etag else {}
         try:
-            resp = self._http.get(f"{BASE_URL}/products/{product}")
+            resp = self._http.get(f"{BASE_URL}/products/full", headers=headers)
         except httpx.HTTPError as exc:
             raise ApiUnavailable(str(exc) or type(exc).__name__) from exc
-        if resp.status_code == 404:
-            return None
+        if resp.status_code == 304:
+            return FullResponse(True, b"", etag)
         if resp.status_code != 200:
-            raise ApiUnavailable(f"HTTP {resp.status_code} for {product}")
-        from .catalog import parse_release  # catalog imports this module
-
-        try:
-            raw = resp.json()["result"]["releases"]
-            return [parse_release(r) for r in raw]
-        except (ValueError, KeyError, TypeError, AttributeError) as exc:
-            raise ApiUnavailable(f"unexpected response for {product}") from exc
+            raise ApiUnavailable(f"HTTP {resp.status_code} for products/full")
+        return FullResponse(False, resp.content, resp.headers.get("ETag"))

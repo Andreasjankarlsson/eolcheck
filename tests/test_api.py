@@ -1,58 +1,60 @@
 import httpx
 import pytest
 
-from eolchecker.api import ApiUnavailable, EolClient, Release
+from eolchecker.api import ApiUnavailable, EolClient
 
-PAYLOAD = {"result": {"releases": [{
-    "name": "3.1", "releaseDate": "2023-05-18", "isEol": True,
-    "eolFrom": "2024-06-30", "latest": {"name": "3.1.12"},
-}]}}
+from .fakes import payload, product
+
+BODY = payload(product("php", "PHP"))
 
 
 def client_for(handler):
     return EolClient(httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True))
 
 
-def test_releases_parses_v1_payload():
+def test_products_full_200_returns_body_and_etag():
     def handler(req):
-        assert req.url.path == "/api/v1/products/spring-boot"
-        return httpx.Response(200, json=PAYLOAD)
-    assert client_for(handler).releases("spring-boot") == [
-        Release("3.1", "2023-05-18", True, "2024-06-30", "3.1.12")
-    ]
+        assert req.url.path == "/api/v1/products/full"
+        return httpx.Response(200, content=BODY, headers={"ETag": '"abc"'})
+    resp = client_for(handler).products_full()
+    assert resp.body == BODY
+    assert resp.etag == '"abc"'
+    assert resp.not_modified is False
 
 
-def test_404_returns_none():
-    assert client_for(lambda req: httpx.Response(404, text="<html>")).releases("nope") is None
+def test_products_full_sends_if_none_match():
+    seen = []
+
+    def handler(req):
+        seen.append(req.headers.get("If-None-Match"))
+        return httpx.Response(200, content=BODY)
+    client_for(handler).products_full('"abc"')
+    client_for(handler).products_full()
+    assert seen == ['"abc"', None]
 
 
-@pytest.mark.parametrize("status", [429, 500])
-def test_error_status_raises(status):
+def test_products_full_304():
+    resp = client_for(lambda req: httpx.Response(304)).products_full('"abc"')
+    assert resp.not_modified is True
+    assert resp.body == b""
+
+
+@pytest.mark.parametrize("status", [404, 500])
+def test_products_full_error_status_raises(status):
     with pytest.raises(ApiUnavailable):
-        client_for(lambda req: httpx.Response(status)).releases("spring-boot")
+        client_for(lambda req: httpx.Response(status)).products_full()
 
 
-def test_connect_error_raises():
+def test_products_full_connect_error_raises():
     def handler(req):
         raise httpx.ConnectError("boom")
     with pytest.raises(ApiUnavailable):
-        client_for(handler).releases("spring-boot")
-
-
-def test_bad_json_raises():
-    with pytest.raises(ApiUnavailable):
-        client_for(lambda req: httpx.Response(200, text="not json")).releases("spring-boot")
-
-
-def test_odd_shaped_release_raises():
-    payload = {"result": {"releases": [{"name": "3.1", "isEol": True, "latest": "3.1.12"}]}}
-    with pytest.raises(ApiUnavailable):
-        client_for(lambda req: httpx.Response(200, json=payload)).releases("spring-boot")
+        client_for(handler).products_full()
 
 
 def test_follows_redirect():
     def handler(req):
-        if req.url.path.endswith("/old-name"):
-            return httpx.Response(301, headers={"Location": "/api/v1/products/new-name"})
-        return httpx.Response(200, json=PAYLOAD)
-    assert client_for(handler).releases("old-name")[0].name == "3.1"
+        if req.url.path.endswith("/products/full"):
+            return httpx.Response(301, headers={"Location": "/api/v1/products/everything"})
+        return httpx.Response(200, content=BODY)
+    assert client_for(handler).products_full().body == BODY
