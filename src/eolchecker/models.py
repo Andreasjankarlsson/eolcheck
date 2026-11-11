@@ -44,6 +44,17 @@ class Finding:
     display: str  # what the Version column shows
     source: Path  # relative to the scan root
     via_maven: bool = False
+    origin: str = ""  # what the Dependencies column shows for a runtime/parent finding
+
+
+@dataclass(frozen=True)
+class Dependency:
+    key: str  # "<ecosystem>:<name>", lower case (catalog.dep_key)
+    name: str  # as shown in the Dependencies column
+    version: str | None  # normalised
+    display: str | None
+    source: Path  # relative to the scan root
+    via_maven: bool = False
 
 
 @dataclass(frozen=True)
@@ -56,11 +67,14 @@ class Unrecognised:
 class DetectResult:
     findings: list[Finding] = field(default_factory=list)
     unrecognised: list[Unrecognised] = field(default_factory=list)
+    dependencies: list[Dependency] = field(default_factory=list)
 
     def extend(self, other: DetectResult) -> None:
         self.findings.extend(other.findings)
         self.unrecognised.extend(other.unrecognised)
+        self.dependencies.extend(other.dependencies)
 
 
-def finding(component: str, version: str, display: str, source: Path, via_maven: bool = False) -> Finding:
-    return Finding(component, COMPONENTS[component], version, display, source, via_maven)
+def finding(component: str, version: str, display: str, source: Path,
+            via_maven: bool = False, origin: str = "") -> Finding:
+    return Finding(component, COMPONENTS[component], version, display, source, via_maven, origin)

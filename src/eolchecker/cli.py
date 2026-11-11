@@ -8,6 +8,7 @@ from pathlib import Path
 from rich.console import Console
 
 from .api import ApiUnavailable, EolClient
+from .catalog import PurlIndex
 from .detectors import Context
 from .report import render
 from .rows import build_rows
@@ -40,7 +41,7 @@ def main(argv: list[str] | None = None, client=None, detectors=None) -> int:
         return 0
 
     try:
-        rows = build_rows(result.findings, client or EolClient())
+        rows = build_rows(result.findings, result.dependencies, PurlIndex())  # Task 9 wires the real catalogue
     except ApiUnavailable as exc:
         print(f"Couldn't fetch end-of-life dates from endoflife.date: {exc}", file=sys.stderr)
         return 1
