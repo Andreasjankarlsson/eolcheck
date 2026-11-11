@@ -4,3 +4,4 @@ __pycache__/
 *.egg-info/
 .pytest_tmp/
 .claude/settings.local.json
+examples/
