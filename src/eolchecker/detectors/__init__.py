@@ -26,3 +26,7 @@ class Detector(Protocol):
 
 
 DETECTORS: list[Detector] = []
+
+from .npm import NpmDetector  # noqa: E402
+
+DETECTORS.append(NpmDetector())
