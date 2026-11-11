@@ -207,6 +207,21 @@ def test_generic_gap_maven_without_the_dependency(write_files, monkeypatch):
     assert [d.version for d in result.dependencies] == [None]
 
 
+HIBERNATE = product("hibernate-orm", "Hibernate ORM", ["pkg:maven/org.hibernate.orm/hibernate-envers"])
+ENVERS_KEY = "maven:org.hibernate.orm/hibernate-envers"
+BOOT_POM_ENVERS = BOOT_POM_VERSIONLESS_HIBERNATE.replace("hibernate-core", "hibernate-envers")
+EFFECTIVE_ENVERS = EFFECTIVE.replace("hibernate-core", "hibernate-envers")
+
+
+def test_fallback_fills_special_product_gap(write_files, monkeypatch):
+    with_mvn(monkeypatch)
+    root = write_files({"api/pom.xml": BOOT_POM_ENVERS})
+    result = detect_idx(root, FakeRunner(EFFECTIVE_ENVERS), HIBERNATE)
+    assert result.unrecognised == []
+    assert result.dependencies == [
+        Dependency(ENVERS_KEY, "hibernate-envers", "6.5.2", "6.5.2.Final", Path("api/pom.xml"), via_maven=True)]
+
+
 def test_versionless_declaration_without_maven(write_files, monkeypatch):
     monkeypatch.setattr(maven_fallback.shutil, "which", lambda name: None)
     root = write_files({"api/pom.xml": BOOT_POM_VERSIONLESS_HIBERNATE})

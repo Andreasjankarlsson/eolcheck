@@ -354,6 +354,41 @@ def test_child_gets_version_from_parent_dependency_management(write_files):
     assert result.dependencies[0] == Dependency(JACKSON_KEY, "jackson-databind", "2.15.2", "2.15.2", src)
 
 
+HIBERNATE = product("hibernate-orm", "Hibernate ORM", ["pkg:maven/org.hibernate.orm/hibernate-core",
+                                                       "pkg:maven/org.hibernate.orm/hibernate-envers"])
+
+
+def test_special_product_not_matched_by_special_case_is_a_gap(write_files):
+    body = BOOT_PARENT + JAVA17 + "<dependencies>" + dep("org.hibernate.orm", "hibernate-envers") + "</dependencies>"
+    result = run_idx(write_files({"pom.xml": pom(body)}), "pom.xml", HIBERNATE)
+    assert result.unrecognised == [Unrecognised(Path("pom.xml"), "Hibernate ORM version is set by Spring Boot")]
+
+
+def test_special_case_gap_not_repeated_for_sibling(write_files):
+    body = BOOT_PARENT + JAVA17 + "<dependencies>" + dep("org.hibernate.orm", "hibernate-core") \
+        + dep("org.hibernate.orm", "hibernate-envers") + "</dependencies>"
+    result = run_idx(write_files({"pom.xml": pom(body)}), "pom.xml", HIBERNATE)
+    assert result.unrecognised == [Unrecognised(Path("pom.xml"), "Hibernate ORM version is set by Spring Boot")]
+
+
+def test_parent_managed_version_uses_child_property(write_files):
+    root_pom = pom("<groupId>com.acme</groupId><artifactId>shop</artifactId><version>1.0</version>"
+                   "<packaging>pom</packaging><properties><java.version>17</java.version>"
+                   "<hibernate.version>6.2.0.Final</hibernate.version></properties>"
+                   "<dependencyManagement><dependencies>"
+                   + dep("org.hibernate.orm", "hibernate-core", "${hibernate.version}")
+                   + "</dependencies></dependencyManagement>")
+    child = pom("<parent><groupId>com.acme</groupId><artifactId>shop</artifactId><version>1.0</version></parent>"
+                "<artifactId>app</artifactId><properties><hibernate.version>6.4.4.Final</hibernate.version>"
+                "</properties><dependencies>" + dep("org.hibernate.orm", "hibernate-core") + "</dependencies>")
+    root = write_files({"pom.xml": root_pom, "app/pom.xml": child})
+    det = MavenDetector(runner=must_not_run)
+    result = det.detect(root / "app/pom.xml", Context(root, use_maven=True, index=index(HIBERNATE)))
+    assert [(f.component, f.version) for f in result.findings] == [("Hibernate ORM", "6.4.4")]
+    assert [d.version for d in result.dependencies] == ["6.4.4"]
+    assert result.unrecognised == []
+
+
 def test_origins(write_files):
     body = BOOT_PARENT + JAVA17
     found = {f.component: f.origin for f in run_idx(write_files({"pom.xml": pom(body)})).findings}

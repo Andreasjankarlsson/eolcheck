@@ -10,7 +10,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from ..catalog import PurlIndex, dep_key
-from ..models import DetectResult, Dependency, Unrecognised, finding
+from ..models import COMPONENTS, DetectResult, Dependency, Unrecognised, finding
 from ..versions import normalise
 from . import Context
 from ._util import parse_error, rel
@@ -45,7 +45,7 @@ class PomReading:
     # (component, gap) for the special cases; (dependency key, gap) for other dependencies
     gaps: list[tuple[str, Unrecognised]] = field(default_factory=list)
     products: set[str] = field(default_factory=set)  # slugs reported with a version, here or by parents
-    managed: dict[str, str] = field(default_factory=dict)  # dependency key -> resolved managed version
+    managed: dict[str, str] = field(default_factory=dict)  # dependency key -> raw managed version
 
 
 @dataclass(frozen=True)
@@ -82,7 +82,7 @@ def read_pom(pom_xml: str | bytes, source: Path, parent_props: dict[str, str], *
     coords = _coords(root)
     parent_managed = parent_managed or {}
     managed = dict(parent_managed)
-    managed.update(_managed(coords, props))
+    managed.update(_managed(coords))
     result = DetectResult()
     gaps: list[tuple[str, Unrecognised]] = []
     gap_components: set[str] = set()
@@ -173,7 +173,10 @@ def read_pom(pom_xml: str | bytes, source: Path, parent_props: dict[str, str], *
 
     # Every dependency and plugin
     products = {f.product for f in result.findings} | set(parent_products)
-    deps, dep_gaps = _dependencies(coords, props, managed, index, parent_products, products, source, set_by)
+    # Special-case products that already have a gap in this pom.
+    special_gaps = {COMPONENTS[c] for c in gap_components if COMPONENTS.get(c) in SPECIAL_SLUGS}
+    deps, dep_gaps = _dependencies(coords, props, managed, index, parent_products, products, special_gaps,
+                                   source, set_by)
     result.dependencies.extend(deps)
     for key, component, reason in dep_gaps:
         if component not in gap_components:  # one gap per component per pom
@@ -182,10 +185,12 @@ def read_pom(pom_xml: str | bytes, source: Path, parent_props: dict[str, str], *
 
 
 def _dependencies(coords: list[_Coord], props: dict[str, str], managed: dict[str, str], index: PurlIndex | None,
-                  parent_products: frozenset[str] | set[str], products: set[str], source: Path,
-                  set_by) -> tuple[list[Dependency], list[tuple[str, str, str]]]:
+                  parent_products: frozenset[str] | set[str], products: set[str], special_gaps: set[str],
+                  source: Path, set_by) -> tuple[list[Dependency], list[tuple[str, str, str]]]:
     """Every <dependency> and <plugin> as a Dependency, plus (key, component, reason) for each tracked
-    one whose version is not known here. Adds the products of versioned dependencies to `products`."""
+    one whose version is not known here. Adds the products of versioned dependencies to `products`.
+    `managed` values are raw and resolved here with this pom's properties (Maven interpolates after
+    inheritance)."""
     deps: list[Dependency] = []
     gaps: list[tuple[str, str, str]] = []
     resolved = []
@@ -207,8 +212,8 @@ def _dependencies(coords: list[_Coord], props: dict[str, str], managed: dict[str
         if matches and all(m.product in parent_products for m in matches):
             continue  # the in-repo parent's row covers it
         deps.append(Dependency(c.key, c.artifact, None, None, source))
-        if not matches or any(m.product in SPECIAL_SLUGS or m.product in products for m in matches):
-            continue  # untracked, reported by the special cases, or joins a versioned row
+        if not matches or any(m.product in special_gaps or m.product in products for m in matches):
+            continue  # untracked, already a special-case gap, or joins a versioned row
         component = matches[0].component
         if missing:
             reason = f"couldn't resolve ${{{missing}}}"
@@ -364,17 +369,16 @@ def _coords(root: ET.Element) -> list[_Coord]:
     return out
 
 
-def _managed(coords: list[_Coord], props: dict[str, str]) -> dict[str, str]:
-    """Dependency key -> resolved version from <dependencyManagement> and <pluginManagement>.
-    BOM imports are not versions for other artifacts, so they are left out."""
+def _managed(coords: list[_Coord]) -> dict[str, str]:
+    """Dependency key -> raw version from <dependencyManagement> and <pluginManagement>. Left raw so a
+    child pom resolves `${…}` with its own properties. BOM imports are not versions for other
+    artifacts, so they are left out."""
     out: dict[str, str] = {}
     for c in coords:
         if c.section not in ("managed", "managed-plugin") or not c.group or not c.artifact or not c.version \
                 or c.scope == "import":
             continue
-        value, missing = _resolve(c.version, props)
-        if not missing:
-            out.setdefault(c.key, value)
+        out.setdefault(c.key, c.version)
     return out
 
 
