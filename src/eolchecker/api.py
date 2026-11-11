@@ -37,17 +37,10 @@ class EolClient:
             return None
         if resp.status_code != 200:
             raise ApiUnavailable(f"HTTP {resp.status_code} for {product}")
+        from .catalog import parse_release  # catalog imports this module
+
         try:
             raw = resp.json()["result"]["releases"]
-            return [
-                Release(
-                    name=r["name"],
-                    release_date=r.get("releaseDate") or "",
-                    is_eol=bool(r.get("isEol")),
-                    eol_from=r.get("eolFrom"),
-                    latest=(r.get("latest") or {}).get("name"),
-                )
-                for r in raw
-            ]
+            return [parse_release(r) for r in raw]
         except (ValueError, KeyError, TypeError, AttributeError) as exc:
             raise ApiUnavailable(f"unexpected response for {product}") from exc

@@ -23,6 +23,18 @@ COMPONENTS: dict[str, str] = {
     "Symfony": "symfony",
 }
 
+# Dependency key -> component name, for packages whose catalogue entry would be
+# ambiguous or wrongly named (see catalog.PurlIndex.resolve).
+OVERRIDES: dict[str, str] = {
+    "npm:@angular/core": "Angular",
+    "npm:angular": "AngularJS",
+    "npm:react": "React",
+    "npm:next": "Next.js",
+    "composer:laravel/framework": "Laravel",
+    "composer:symfony/framework-bundle": "Symfony",
+    "composer:symfony/http-kernel": "Symfony",
+}
+
 
 @dataclass(frozen=True)
 class Finding:

@@ -6,10 +6,11 @@ detectors at the bottom of this module.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from ..catalog import PurlIndex
 from ..models import DetectResult
 
 
@@ -17,6 +18,7 @@ from ..models import DetectResult
 class Context:
     root: Path
     use_maven: bool = True
+    index: PurlIndex = field(default_factory=PurlIndex)
 
 
 class Detector(Protocol):
