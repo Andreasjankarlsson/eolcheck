@@ -16,21 +16,25 @@ POM = """<project xmlns="http://maven.apache.org/POM/4.0.0">
   <version>3.1.5</version></parent>
   <artifactId>backend</artifactId>
   <properties><java.version>17</java.version></properties>
+  <dependencies>
+    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>
+  </dependencies>
 </project>"""
 
 CSPROJ = '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>'
 
 
-def test_mixed_repo_against_real_api(write_files, capsys):
+def test_mixed_repo_against_real_api(write_files, tmp_path, capsys):
     root = write_files({
         "backend/pom.xml": POM,
         "frontend/package.json": json.dumps({"dependencies": {"@angular/core": "16.2.0"}}),
         "api/Api.csproj": CSPROJ,
         "web/composer.json": json.dumps({"require": {"php": ">=7.4", "laravel/framework": "^10.0"}}),
     })
-    assert main([str(root), "--no-maven"]) == 0
+    assert main([str(root), "--no-maven"], cache_dir=tmp_path / "cache") == 0
     out = capsys.readouterr().out
     for component in ["Spring Boot", "Java", "Angular", ".NET", "PHP", "Laravel"]:
         assert component in out
     assert "END OF LIFE" in out  # Spring Boot 3.1 and Angular 16 are long past end of life
-    assert "unknown" not in out
+    assert "spring-boot-starter-web" in out
+    assert "unknown version" not in out
