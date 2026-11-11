@@ -101,5 +101,37 @@ def test_broken_central_props_is_named(write_files):
     assert [d.version for d in result.dependencies] == ["3.1.1"]
 
 
+def test_central_props_read_once_per_scan(write_files, monkeypatch):
+    root = write_files({
+        "Directory.Packages.props": '<Project><ItemGroup><PackageVersion Include="Serilog" Version="3.1.1" /></ItemGroup></Project>',
+        "src/A.csproj": project('<ItemGroup><PackageReference Include="Serilog" /></ItemGroup>'),
+        "src/B.csproj": project('<ItemGroup><PackageReference Include="Serilog" /></ItemGroup>'),
+    })
+    calls = []
+    real = Path.read_bytes
+
+    def counting(self):
+        if self.name == "Directory.Packages.props":
+            calls.append(self)
+        return real(self)
+    monkeypatch.setattr(Path, "read_bytes", counting)
+    det, ctx = NugetDetector(), Context(root)
+    versions = [d.version for rel in ("src/A.csproj", "src/B.csproj") for d in det.detect(root / rel, ctx).dependencies]
+    assert versions == ["3.1.1", "3.1.1"]
+    assert len(calls) == 1
+
+
+def test_broken_central_props_named_for_every_project(write_files):
+    root = write_files({
+        "Directory.Packages.props": "<Project><ItemGroup>",
+        "A.csproj": project('<ItemGroup><PackageReference Include="Serilog" Version="3.1.1" /></ItemGroup>'),
+        "B.csproj": project('<ItemGroup><PackageReference Include="Serilog" Version="3.1.1" /></ItemGroup>'),
+    })
+    det, ctx = NugetDetector(), Context(root)
+    for rel in ("A.csproj", "B.csproj"):
+        assert det.detect(root / rel, ctx).unrecognised == [
+            Unrecognised(Path("Directory.Packages.props"), "couldn't parse Directory.Packages.props")]
+
+
 def test_registered():
     assert any(isinstance(d, NugetDetector) for d in DETECTORS)

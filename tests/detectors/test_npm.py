@@ -94,6 +94,44 @@ def test_yarn_berry_lock(write_files):
     assert f.version == "18.3.1"
 
 
+def _count_reads(monkeypatch, name):
+    import eolchecker.detectors.npm as npm
+    calls = []
+    real = npm.read_text
+
+    def counting(path):
+        if path.name == name:
+            calls.append(path)
+        return real(path)
+    monkeypatch.setattr(npm, "read_text", counting)
+    return calls
+
+
+def test_yarn_lock_read_once_for_several_dependencies(write_files, monkeypatch):
+    yarn = ('react@^18.2.0:\n  version "18.2.0"\n\n'
+            'react-dom@^18.2.0:\n  version "18.2.1"\n')
+    root = write_files({"package.json": pkg({"react": "^18.2.0", "react-dom": "^18.2.0"}), "yarn.lock": yarn})
+    calls = _count_reads(monkeypatch, "yarn.lock")
+    assert [d.version for d in run(root, "package.json").dependencies] == ["18.2.0", "18.2.1"]
+    assert len(calls) == 1
+
+
+def test_root_lock_read_once_per_scan_for_workspaces(write_files, monkeypatch):
+    lock = {"lockfileVersion": 3, "packages": {"apps/a": {}, "apps/b": {},
+                                               "node_modules/react": {"version": "18.3.1"}}}
+    root = write_files({"package-lock.json": json.dumps(lock),
+                        "apps/a/package.json": pkg({"react": "^18.2.0"}),
+                        "apps/b/package.json": pkg({"react": "^18.2.0"})})
+    calls = _count_reads(monkeypatch, "package-lock.json")
+    det, ctx = NpmDetector(), Context(root)
+    versions = [d.version for rel in ("apps/a/package.json", "apps/b/package.json")
+                for d in det.detect(root / rel, ctx).dependencies]
+    assert versions == ["18.3.1", "18.3.1"]
+    assert len(calls) == 1
+    det.detect(root / "apps/a/package.json", Context(root))  # a new scan reads the lock again
+    assert len(calls) == 2
+
+
 def test_pnpm_lock(write_files):
     pnpm = ("lockfileVersion: '9.0'\nimporters:\n  apps/web:\n    dependencies:\n"
             "      next:\n        specifier: ^14.1.0\n        version: 14.2.3(react@18.3.1)\n")

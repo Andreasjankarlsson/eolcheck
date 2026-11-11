@@ -18,6 +18,22 @@ DEP_SECTIONS = ("dependencies", "devDependencies", "peerDependencies")
 
 
 class NpmDetector:
+    def __init__(self) -> None:
+        # Lock files already read in the current scan (one Context per scan), so a root lock
+        # shared by many workspaces is parsed once.
+        self._ctx: Context | None = None
+        self._locks: dict[Path, _Lock] = {}
+
+    def _lock(self, start: Path, ctx: Context) -> _Lock | None:
+        if ctx is not self._ctx:
+            self._ctx, self._locks = ctx, {}
+        path = _find_lock(start, ctx.root)
+        if path is None:
+            return None
+        if path not in self._locks:
+            self._locks[path] = _Lock(path)
+        return self._locks[path]
+
     def applies_to(self, path: Path) -> bool:
         return path.name in ("package.json", ".nvmrc", ".node-version")
 
@@ -44,7 +60,7 @@ class NpmDetector:
 
         result = DetectResult()
         source = rel(path, ctx)
-        lock = _Lock.find(path.parent, ctx.root)
+        lock = self._lock(path.parent, ctx)
         for section in DEP_SECTIONS:
             deps = data.get(section)
             if not isinstance(deps, dict):
@@ -78,20 +94,21 @@ def _dependency(name: str, declared: str, lock: _Lock | None, path: Path, source
     return Dependency(key, name, version, declared if is_range(declared) else version, source)
 
 
+def _find_lock(start: Path, root: Path) -> Path | None:
+    """The nearest lock file at or above `start`."""
+    for d in dirs_up(start, root):
+        for name in LOCK_FILES:
+            if (d / name).is_file():
+                return d / name
+    return None
+
+
 class _Lock:
-    """The nearest lock file, read lazily, with one lookup method per format."""
+    """A lock file, read once on first use, with one lookup method per format."""
 
     def __init__(self, path: Path):
         self.path = path
         self._data = None
-
-    @classmethod
-    def find(cls, start: Path, root: Path) -> _Lock | None:
-        for d in dirs_up(start, root):
-            for name in LOCK_FILES:
-                if (d / name).is_file():
-                    return cls(d / name)
-        return None
 
     def version(self, name: str, declared: str, pkg_dir: Path) -> str | None:
         try:
@@ -130,16 +147,11 @@ class _Lock:
         return dep.get("version") if isinstance(dep, dict) else None
 
     def _yarn(self, name: str, declared: str) -> str | None:
-        wanted = {f"{name}@{declared}", f"{name}@npm:{declared}"}
-        in_block = False
-        for line in read_text(self.path).splitlines():
-            if line and not line[0].isspace():
-                entries = {e.strip().strip('"') for e in line.rstrip(":").split(",")}
-                in_block = bool(entries & wanted)
-            elif in_block:
-                m = re.match(r'^\s+version:?\s+"?([^"\s]+)"?', line)
-                if m:
-                    return m.group(1)
+        if self._data is None:
+            self._data = _yarn_versions(read_text(self.path))
+        for entry in (f"{name}@{declared}", f"{name}@npm:{declared}"):
+            if entry in self._data:
+                return self._data[entry]
         return None
 
     def _pnpm(self, name: str, pkg_dir: Path) -> str | None:
@@ -159,3 +171,19 @@ class _Lock:
             if isinstance(entry, str):
                 return entry.split("(")[0]
         return None
+
+
+def _yarn_versions(text: str) -> dict[str, str]:
+    """yarn.lock (classic or berry) as entry ('react@^18.2.0', 'react@npm:^18.2.0') -> version."""
+    versions: dict[str, str] = {}
+    entries: set[str] = set()
+    for line in text.splitlines():
+        if line and not line[0].isspace():
+            entries = {e.strip().strip('"') for e in line.rstrip(":").split(",")}
+        elif entries:
+            m = re.match(r'^\s+version:?\s+"?([^"\s]+)"?', line)
+            if m:
+                for entry in entries:
+                    versions.setdefault(entry, m.group(1))
+                entries = set()
+    return versions
