@@ -80,8 +80,13 @@ def purl_key(purl: str) -> str | None:
     ecosystem, _, name = rest.partition("/")
     if ecosystem not in _ECOSYSTEMS or not name:
         return None
-    name = name.split("@", 1)[0]  # still encoded, so %40 is not taken for a version
-    return dep_key(ecosystem, unquote(name))
+    # The version follows the name, which is the last path segment, so an '@' there starts the
+    # version, while one in an earlier segment is an npm scope (written as @ or %40).
+    namespace, slash, last = name.rpartition("/")
+    last = last.split("@", 1)[0]
+    if not last:
+        return None
+    return dep_key(ecosystem, unquote(namespace + slash + last))
 
 
 def dep_key(ecosystem: str, name: str) -> str:

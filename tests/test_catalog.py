@@ -16,6 +16,11 @@ from .fakes import index, payload, product
     ("pkg:docker/library/nginx", None),
     ("pkg:github/foo/bar", None),
     ("not a purl", None),
+    ("pkg:npm/@angular/core", "npm:@angular/core"),
+    ("pkg:npm/@angular/core@16.0.0", "npm:@angular/core"),
+    ("pkg:maven/org.springframework/spring-core@6.1.5", "maven:org.springframework/spring-core"),
+    ("pkg:npm/@16.0.0", None),
+    ("pkg:npm/%40angular/", None),
 ])
 def test_purl_key(purl, key):
     assert purl_key(purl) == key

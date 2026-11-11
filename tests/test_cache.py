@@ -62,6 +62,23 @@ def test_network_down_uses_cache_and_warns(tmp_path):
     assert warnings == ["endoflife.date unreachable; using data from 2026-11-09"]
 
 
+def test_non_string_etag_is_treated_as_absent(tmp_path):
+    (tmp_path / "products-full.json").write_bytes(BODY)
+    (tmp_path / "products-full.meta.json").write_text(json.dumps({"etag": 5, "fetched": "2026-11-09"}))
+    client = FakeClient(OK)
+    assert slugs(load_catalog(client, tmp_path, refresh=False, warn=print)) == ["php"]
+    assert client.etags == [None]
+
+
+@pytest.mark.parametrize("fetched", [None, 12345, ["x"]])
+def test_network_down_with_unknown_fetched_date(tmp_path, fetched):
+    (tmp_path / "products-full.json").write_bytes(BODY)
+    (tmp_path / "products-full.meta.json").write_text(json.dumps({"etag": '"e1"', "fetched": fetched}))
+    warnings = []
+    load_catalog(FakeClient(ApiUnavailable("down")), tmp_path, refresh=False, warn=warnings.append)
+    assert warnings == ["endoflife.date unreachable; using data from an unknown date"]
+
+
 def test_network_down_without_cache_raises(tmp_path):
     with pytest.raises(ApiUnavailable):
         load_catalog(FakeClient(ApiUnavailable("down")), tmp_path, refresh=False, warn=print)
@@ -136,6 +153,20 @@ def test_config_cache_dir_relative_to_checkout(tmp_path, monkeypatch):
     monkeypatch.setattr(cache, "checkout_root", lambda: tmp_path)
     (tmp_path / "eolchecker.toml").write_text('cache_dir = "data"\n')
     assert default_cache_dir(print) == tmp_path / "data"
+
+
+def test_config_cache_dir_expands_home(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache, "checkout_root", lambda: tmp_path / "checkout")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "checkout").mkdir()
+    (tmp_path / "checkout" / "eolchecker.toml").write_text('cache_dir = "~/eol-cache"\n')
+    assert default_cache_dir(print) == tmp_path / "home" / "eol-cache"
+
+
+def test_config_cache_dir_absolute(tmp_path, monkeypatch):
+    monkeypatch.setattr(cache, "checkout_root", lambda: tmp_path)
+    (tmp_path / "eolchecker.toml").write_text(f'cache_dir = "{(tmp_path / "abs").as_posix()}"\n')
+    assert default_cache_dir(print) == tmp_path / "abs"
 
 
 def test_default_cache_dir_is_checkout_dot_cache(tmp_path, monkeypatch):

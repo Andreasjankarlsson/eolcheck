@@ -43,7 +43,8 @@ def default_cache_dir(warn: Callable[[str], None]) -> Path:
             if value is not None:
                 if not isinstance(value, str):
                     raise ValueError("cache_dir must be a string")
-                return root / value
+                path = Path(value).expanduser()
+                return path if path.is_absolute() else root / path
         except (OSError, ValueError) as exc:  # TOMLDecodeError is a ValueError
             warn(f"Ignoring {config}: {exc}")
     return root / ".cache"
@@ -97,6 +98,8 @@ def load_catalog(client: EolClient, cache_dir: Path, *, refresh: bool,
         if cached is not None:
             cache_dir = user_cache_dir()
     etag = cached[1].get("etag") if cached else None
+    if not isinstance(etag, str):
+        etag = None
     try:
         resp = client.products_full(None if refresh or cached is None else etag)
         if resp.not_modified:
@@ -111,8 +114,9 @@ def load_catalog(client: EolClient, cache_dir: Path, *, refresh: bool,
     except ApiUnavailable:
         if cached is None:
             raise
-        fetched = str(cached[1].get("fetched") or "unknown date")[:10]
-        warn(f"endoflife.date unreachable; using data from {fetched}")
+        fetched = cached[1].get("fetched")
+        when = fetched[:10] if isinstance(fetched, str) and fetched else "an unknown date"
+        warn(f"endoflife.date unreachable; using data from {when}")
         return cached[0]
     _write_with_fallback(cache_dir, resp.body, resp.etag, warn)
     return products
