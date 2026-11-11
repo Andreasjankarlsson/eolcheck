@@ -12,6 +12,13 @@ BODY = payload(product("php", "PHP"))
 OK = FullResponse(False, BODY, '"e1"')
 
 
+@pytest.fixture(autouse=True)
+def isolated_user_cache(tmp_path_factory, monkeypatch):
+    """Never touch (or read) the real user cache."""
+    user = tmp_path_factory.mktemp("user")
+    monkeypatch.setattr(cache, "user_cache_dir", lambda: user)
+
+
 def slugs(products):
     return [p.slug for p in products]
 
@@ -85,6 +92,44 @@ def test_unwritable_cache_dir_falls_back_to_user_cache(tmp_path, monkeypatch):
     assert slugs(result) == ["php"]
     assert (user / "products-full.json").exists()
     assert len(warnings) == 1 and str(user) in warnings[0]
+
+
+def test_user_cache_fallback_is_read_back(tmp_path, monkeypatch):
+    blocker = tmp_path / "blocker"
+    blocker.write_text("")
+    user = tmp_path / "user"
+    monkeypatch.setattr(cache, "user_cache_dir", lambda: user)
+    load_catalog(FakeClient(OK), blocker, refresh=False, warn=lambda m: None)
+    warnings = []
+    client = FakeClient(ApiUnavailable("down"))
+    result = load_catalog(client, blocker, refresh=False, warn=warnings.append)
+    assert slugs(result) == ["php"]
+    assert client.etags == ['"e1"']
+    assert len(warnings) == 1 and "unreachable" in warnings[0]
+
+
+def test_user_cache_fallback_sends_etag_without_rewarning(tmp_path, monkeypatch):
+    blocker = tmp_path / "blocker"
+    blocker.write_text("")
+    monkeypatch.setattr(cache, "user_cache_dir", lambda: tmp_path / "user")
+    load_catalog(FakeClient(OK), blocker, refresh=False, warn=lambda m: None)
+    warnings = []
+    client = FakeClient(FullResponse(True, b"", None))
+    assert slugs(load_catalog(client, blocker, refresh=False, warn=warnings.append)) == ["php"]
+    assert client.etags == ['"e1"']
+    assert warnings == []
+
+
+def test_double_write_failure_warns_without_claiming_fallback(tmp_path, monkeypatch):
+    blocker = tmp_path / "blocker"
+    blocker.write_text("")
+    blocker2 = tmp_path / "blocker2"
+    blocker2.write_text("")
+    monkeypatch.setattr(cache, "user_cache_dir", lambda: blocker2)
+    warnings = []
+    result = load_catalog(FakeClient(OK), blocker, refresh=False, warn=warnings.append)
+    assert slugs(result) == ["php"]
+    assert warnings == [f"Couldn't write cache in {blocker} or {blocker2}"]
 
 
 def test_config_cache_dir_relative_to_checkout(tmp_path, monkeypatch):

@@ -80,16 +80,22 @@ def _write_with_fallback(cache_dir: Path, body: bytes | None, etag: str | None,
     except OSError:
         pass
     fallback = user_cache_dir()
-    warn(f"Couldn't write cache in {cache_dir}; using {fallback}")
     try:
         _write(fallback, body, etag)
     except OSError:
-        pass
+        warn(f"Couldn't write cache in {cache_dir} or {fallback}")
+        return
+    warn(f"Couldn't write cache in {cache_dir}; using {fallback}")
 
 
 def load_catalog(client: EolClient, cache_dir: Path, *, refresh: bool,
                  warn: Callable[[str], None]) -> list[Product]:
     cached = _read_cache(cache_dir)
+    if cached is None:
+        # An earlier run may have fallen back to the user cache.
+        cached = _read_cache(user_cache_dir())
+        if cached is not None:
+            cache_dir = user_cache_dir()
     etag = cached[1].get("etag") if cached else None
     try:
         resp = client.products_full(None if refresh or cached is None else etag)
