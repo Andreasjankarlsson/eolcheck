@@ -5,8 +5,10 @@ import pytest
 from eolchecker.detectors import DETECTORS, Context
 from eolchecker.detectors.maven import MavenDetector, java_version, read_pom
 from eolchecker.models import Dependency, Finding, Unrecognised
+from eolchecker.rows import build_rows
 
 from ..fakes import index, product
+from ..fakes import rel as release
 
 NS = 'xmlns="http://maven.apache.org/POM/4.0.0"'
 
@@ -406,6 +408,45 @@ def test_origins_from_boms_and_properties(write_files):
     assert found == {"Spring Boot": "spring-boot-dependencies", "Spring Framework": "spring-framework-bom",
                      "Java": "maven.compiler.release", "Hibernate ORM": "hibernate-core",
                      "Apache Tomcat": "tomcat.version"}
+
+
+CLOUD = product("spring-cloud", "Spring Cloud", ["pkg:maven/org.springframework.cloud/spring-cloud-dependencies"])
+CLOUD_KEY = "maven:org.springframework.cloud/spring-cloud-dependencies"
+
+
+def test_tracked_bom_import_is_a_dependency(write_files):
+    body = (JAVA17 + "<properties><cloud.version>2023.0.0</cloud.version></properties><dependencyManagement><dependencies>"
+            + dep("org.springframework.cloud", "spring-cloud-dependencies", "${cloud.version}",
+                  "<type>pom</type><scope>import</scope>")
+            + dep("com.fasterxml.jackson", "jackson-bom", "2.15.2", "<type>pom</type><scope>import</scope>")
+            + "</dependencies></dependencyManagement>")
+    result = run_idx(write_files({"pom.xml": pom(body)}), "pom.xml", CLOUD)
+    assert result.dependencies == [Dependency(CLOUD_KEY, "spring-cloud-dependencies", "2023.0.0", "2023.0.0",
+                                              Path("pom.xml"))]
+    assert result.unrecognised == []
+
+
+def test_unresolvable_bom_import_is_skipped(write_files):
+    body = (JAVA17 + "<dependencyManagement><dependencies>"
+            + dep("org.springframework.cloud", "spring-cloud-dependencies", "${cloud.version}",
+                  "<type>pom</type><scope>import</scope>")
+            + "</dependencies></dependencyManagement>")
+    result = run_idx(write_files({"pom.xml": pom(body)}), "pom.xml", CLOUD)
+    assert (result.dependencies, result.unrecognised) == ([], [])
+
+
+def test_boot_bom_import_joins_the_boot_row_once(write_files):
+    boot = product("spring-boot", "Spring Boot", ["pkg:maven/org.springframework.boot/spring-boot-dependencies"],
+                   [release("3.2", "2023-11-23", True, "2024-11-23", "3.2.12")])
+    body = (JAVA17 + "<dependencyManagement><dependencies>"
+            + dep("org.springframework.boot", "spring-boot-dependencies", "3.2.4", "<type>pom</type><scope>import</scope>")
+            + "</dependencies></dependencyManagement>")
+    idx = index(boot)
+    root = write_files({"pom.xml": pom(body)})
+    result = MavenDetector().detect(root / "pom.xml", Context(root, use_maven=False, index=idx))
+    assert [d.name for d in result.dependencies] == ["spring-boot-dependencies"]
+    boot_rows = [r for r in build_rows(result.findings, result.dependencies, idx) if r.component == "Spring Boot"]
+    assert [(r.dependencies, r.version) for r in boot_rows] == [(("spring-boot-dependencies",), "3.2.4")]
 
 
 def test_bom_import_is_not_a_managed_version(write_files):

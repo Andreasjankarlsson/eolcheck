@@ -187,12 +187,23 @@ def read_pom(pom_xml: str | bytes, source: Path, parent_props: dict[str, str], *
 def _dependencies(coords: list[_Coord], props: dict[str, str], managed: dict[str, str], index: PurlIndex | None,
                   parent_products: frozenset[str] | set[str], products: set[str], special_gaps: set[str],
                   source: Path, set_by) -> tuple[list[Dependency], list[tuple[str, str, str]]]:
-    """Every <dependency> and <plugin> as a Dependency, plus (key, component, reason) for each tracked
-    one whose version is not known here. Adds the products of versioned dependencies to `products`.
+    """Every <dependency>, <plugin> and tracked BOM import as a Dependency, plus (key, component, reason)
+    for each tracked one whose version is not known here. Adds the products of versioned dependencies to `products`.
     `managed` values are raw and resolved here with this pom's properties (Maven interpolates after
     inheritance)."""
     deps: list[Dependency] = []
     gaps: list[tuple[str, str, str]] = []
+    # An imported BOM that endoflife.date tracks (e.g. spring-cloud-dependencies) counts as a
+    # dependency when its version can be read; otherwise it is skipped.
+    for c in coords:
+        if c.section != "managed" or c.scope != "import" or not c.version or index is None:
+            continue
+        matches = index.resolve(c.key)
+        value, missing = _resolve(c.version, props)
+        version = None if missing else normalise(value)
+        if matches and version:
+            products.update(m.product for m in matches)
+            deps.append(Dependency(c.key, c.artifact, version, value, source))
     resolved = []
     for c in coords:
         if c.section not in ("dependency", "plugin") or not c.group or not c.artifact:
