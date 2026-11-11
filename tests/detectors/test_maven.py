@@ -99,12 +99,47 @@ def test_spring_framework_bom(write_files):
     assert ("Spring Framework", "5.3.39") in {(f.component, f.version) for f in run(root).findings}
 
 
-def test_boot_managed_framework_not_reported(write_files):
+def test_starter_alone_does_not_report_framework_libs(write_files):
     body = BOOT_PARENT + "<properties><java.version>17</java.version></properties><dependencies>" + \
-        dep("org.springframework", "spring-core") + dep("org.springframework.boot", "spring-boot-starter-web") + \
-        "</dependencies>"
+        dep("org.springframework.boot", "spring-boot-starter-web") + "</dependencies>"
     root = write_files({"pom.xml": pom(body)})
-    assert [f.component for f in run(root).findings] == ["Spring Boot", "Java"]
+    result = run(root)
+    assert [f.component for f in result.findings] == ["Spring Boot", "Java"]
+    assert result.unrecognised == []
+
+
+@pytest.mark.parametrize("group,artifact,component", [
+    ("org.springframework", "spring-context", "Spring Framework"),
+    ("org.hibernate.orm", "hibernate-core", "Hibernate ORM"),
+    ("org.apache.tomcat.embed", "tomcat-embed-core", "Apache Tomcat"),
+])
+def test_versionless_declaration_is_a_gap(write_files, group, artifact, component):
+    body = BOOT_PARENT + "<properties><java.version>17</java.version></properties><dependencies>" + \
+        dep(group, artifact) + "</dependencies>"
+    reading = read_pom(pom(body), Path("pom.xml"), {}, check_java=True)
+    assert [f.component for f in reading.result.findings] == ["Spring Boot", "Java"]
+    assert reading.gap_components == {component}
+    assert reading.result.unrecognised == [Unrecognised(Path("pom.xml"), f"{component} version is set by Spring Boot")]
+
+
+def test_versionless_declaration_with_company_parent(write_files):
+    body = ("<parent><groupId>com.acme</groupId><artifactId>acme-parent</artifactId><version>5</version></parent>"
+            "<properties><java.version>17</java.version></properties><dependencies>"
+            + dep("org.hibernate.orm", "hibernate-core") + "</dependencies>")
+    reading = read_pom(pom(body), Path("pom.xml"), {}, check_java=True)
+    assert reading.result.unrecognised == [
+        Unrecognised(Path("pom.xml"), "Hibernate ORM version is set by a parent pom or BOM")]
+
+
+def test_versionless_declaration_reported_once_at_in_repo_parent(write_files):
+    root_pom = pom(BOOT_PARENT + "<groupId>com.acme</groupId><artifactId>shop</artifactId><version>1.0</version>"
+                   "<packaging>pom</packaging><properties><java.version>21</java.version></properties>"
+                   "<dependencies>" + dep("org.hibernate.orm", "hibernate-core") + "</dependencies>")
+    child = pom("<parent><groupId>com.acme</groupId><artifactId>shop</artifactId><version>1.0</version></parent>"
+                "<artifactId>app</artifactId>")
+    root = write_files({"pom.xml": root_pom, "app/pom.xml": child})
+    assert run(root, "app/pom.xml").unrecognised == []
+    assert [u.reason for u in run(root).unrecognised] == ["Hibernate ORM version is set by Spring Boot"]
 
 
 def test_child_inherits_from_in_repo_parent(write_files):

@@ -126,3 +126,33 @@ def test_runner_exception_is_failure(write_files, monkeypatch):
 
     result = detect(root, boom)
     assert all(u.reason.endswith("(Maven fallback failed)") for u in result.unrecognised)
+
+
+BOOT_POM_VERSIONLESS_HIBERNATE = """<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <parent><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-parent</artifactId><version>3.3.2</version></parent>
+  <artifactId>api</artifactId>
+  <properties><java.version>17</java.version></properties>
+  <dependencies>
+    <dependency><groupId>org.hibernate.orm</groupId><artifactId>hibernate-core</artifactId></dependency>
+  </dependencies>
+</project>"""
+
+
+def test_fallback_fills_versionless_declaration(write_files, monkeypatch):
+    with_mvn(monkeypatch)
+    root = write_files({"api/pom.xml": BOOT_POM_VERSIONLESS_HIBERNATE})
+    result = detect(root, FakeRunner())
+    assert result.findings == [
+        Finding("Spring Boot", "spring-boot", "3.3.2", "3.3.2", Path("api/pom.xml")),
+        Finding("Java", "eclipse-temurin", "17", "17", Path("api/pom.xml")),
+        Finding("Hibernate ORM", "hibernate-orm", "6.5.2", "6.5.2.Final", Path("api/pom.xml"), via_maven=True),
+    ]
+    assert result.unrecognised == []
+
+
+def test_versionless_declaration_without_maven(write_files, monkeypatch):
+    monkeypatch.setattr(maven_fallback.shutil, "which", lambda name: None)
+    root = write_files({"api/pom.xml": BOOT_POM_VERSIONLESS_HIBERNATE})
+    result = detect(root, FakeRunner())
+    assert result.unrecognised == [
+        Unrecognised(Path("api/pom.xml"), "Hibernate ORM version is set by Spring Boot (Maven not found)")]

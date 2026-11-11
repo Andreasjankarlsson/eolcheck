@@ -31,6 +31,10 @@ Spring Boot, Spring Framework, Java, Hibernate ORM, Apache Tomcat,
 .NET, .NET Framework, Angular, AngularJS, React, Next.js, Node.js,
 PHP, Laravel, Symfony.
 
+Spring Framework, Hibernate ORM and Tomcat are only reported when a `pom.xml` declares
+them, not when they come in transitively through a Spring Boot starter. If one is declared
+without a version (Spring Boot picks it), the tool asks Maven for the version.
+
 It reads `pom.xml`, `package.json` (plus lock files), `.nvmrc`,
 `.node-version`, `composer.json`/`composer.lock`, `*.csproj`/`*.fsproj`/`*.vbproj`,
 `Directory.Build.props` and `global.json`. It does not read Gradle files,

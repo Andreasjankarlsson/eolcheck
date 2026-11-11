@@ -96,12 +96,22 @@ def read_pom(pom_xml: str | bytes, source: Path, parent_props: dict[str, str], *
     elif uses_boot and "Spring Boot" not in inherited:
         add_gap("Spring Boot", "couldn't read the Spring Boot version")
 
-    # Spring Framework: only when pinned explicitly
+    boot_managed = boot_raw is not None or "Spring Boot" in inherited
+
+    def declared_without_version(component: str, matches) -> None:
+        """Declared in <dependencies> but the version comes from a parent or BOM: a gap for Maven to fill."""
+        if any(c.section == "dependency" and not c.version and matches(c) for c in coords):
+            add_gap(component, f"{component} version is set by "
+                    + ("Spring Boot" if boot_managed else "a parent pom or BOM"))
+
+    # Spring Framework
+    is_sf = lambda c: c.group == "org.springframework" and c.artifact.startswith("spring-")  # noqa: E731
     sf_raw = _version_of(coords, "org.springframework", {"spring-framework-bom"}, sections={"managed"}) or next(
-        (c.version for c in coords
-         if c.group == "org.springframework" and c.artifact.startswith("spring-") and c.version), None)
+        (c.version for c in coords if is_sf(c) and c.version), None)
     if sf_raw:
         add("Spring Framework", sf_raw)
+    else:
+        declared_without_version("Spring Framework", is_sf)
 
     # Java
     java_raw = next((own_props[k] for k in JAVA_PROPS if own_props.get(k)), None) or _compiler_setting(root)
@@ -111,14 +121,19 @@ def read_pom(pom_xml: str | bytes, source: Path, parent_props: dict[str, str], *
             and not any(props.get(k) for k in JAVA_PROPS):
         add_gap("Java", "couldn't read the Java version")
 
-    # Hibernate ORM and Tomcat: only when pinned explicitly
-    hib_raw = next((c.version for c in coords if c.group in ("org.hibernate", "org.hibernate.orm")
-                    and c.artifact == "hibernate-core" and c.version), None)
+    # Hibernate ORM and Tomcat
+    is_hib = lambda c: c.group in ("org.hibernate", "org.hibernate.orm") and c.artifact == "hibernate-core"  # noqa: E731
+    hib_raw = next((c.version for c in coords if is_hib(c) and c.version), None)
     if hib_raw:
         add("Hibernate ORM", hib_raw)
+    else:
+        declared_without_version("Hibernate ORM", is_hib)
     tomcat_raw = _version_of(coords, "org.apache.tomcat.embed", {"tomcat-embed-core"}) or own_props.get("tomcat.version")
     if tomcat_raw:
         add("Apache Tomcat", tomcat_raw)
+    else:
+        declared_without_version(
+            "Apache Tomcat", lambda c: c.group == "org.apache.tomcat.embed" and c.artifact == "tomcat-embed-core")
 
     return PomReading(result, bool(gaps), {c for c, _ in gaps}, props, gaps)
 

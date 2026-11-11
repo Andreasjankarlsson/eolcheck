@@ -137,7 +137,7 @@ customer-portal
 ## Calls I made (not discussed with the owner)
 
 - Java dates come from the `eclipse-temurin` product (a common OpenJDK build) as a stand-in for "Java".
-- Spring Framework, Hibernate and Tomcat are only reported when the repo pins them explicitly; when they're inherited from Spring Boot, the Spring Boot row covers it.
+- Spring Framework, Hibernate and Tomcat are only reported when a pom in the repo declares them. When they only come in transitively (e.g. Tomcat via a starter), the Spring Boot row covers it. When they're declared without a version (Spring Boot or a parent picks it), the version is filled in from Maven's effective pom; without Maven they're listed under "Not recognised".
 - Lock files win over declared versions; ranges use their lowest version.
 - One row per file rather than merging duplicates.
 - The example Latest column shows full versions, e.g. `4.0.1`.
