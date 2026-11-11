@@ -5,7 +5,9 @@ from pathlib import Path
 from eolchecker.detectors import Context
 from eolchecker.detectors import maven_fallback
 from eolchecker.detectors.maven import MavenDetector
-from eolchecker.models import Finding, Unrecognised
+from eolchecker.models import Dependency, Finding, Unrecognised
+
+from ..fakes import index, product
 
 COMPANY_POM = """<project xmlns="http://maven.apache.org/POM/4.0.0">
   <parent><groupId>com.acme</groupId><artifactId>acme-parent</artifactId><version>5</version></parent>
@@ -58,8 +60,10 @@ def test_fallback_fills_gaps(write_files, monkeypatch):
     root = write_files({"api/pom.xml": COMPANY_POM})
     result = detect(root, FakeRunner())
     assert result.findings == [
-        Finding("Spring Boot", "spring-boot", "3.3.2", "3.3.2", Path("api/pom.xml"), via_maven=True),
-        Finding("Java", "eclipse-temurin", "17", "17", Path("api/pom.xml"), via_maven=True),
+        Finding("Spring Boot", "spring-boot", "3.3.2", "3.3.2", Path("api/pom.xml"), via_maven=True,
+                origin="spring-boot-starter-web"),
+        Finding("Java", "eclipse-temurin", "17", "17", Path("api/pom.xml"), via_maven=True,
+                origin="maven.compiler.release"),
     ]
     assert result.unrecognised == []
 
@@ -143,11 +147,64 @@ def test_fallback_fills_versionless_declaration(write_files, monkeypatch):
     root = write_files({"api/pom.xml": BOOT_POM_VERSIONLESS_HIBERNATE})
     result = detect(root, FakeRunner())
     assert result.findings == [
-        Finding("Spring Boot", "spring-boot", "3.3.2", "3.3.2", Path("api/pom.xml")),
-        Finding("Java", "eclipse-temurin", "17", "17", Path("api/pom.xml")),
-        Finding("Hibernate ORM", "hibernate-orm", "6.5.2", "6.5.2.Final", Path("api/pom.xml"), via_maven=True),
+        Finding("Spring Boot", "spring-boot", "3.3.2", "3.3.2", Path("api/pom.xml"),
+                origin="spring-boot-starter-parent (parent)"),
+        Finding("Java", "eclipse-temurin", "17", "17", Path("api/pom.xml"), origin="java.version"),
+        Finding("Hibernate ORM", "hibernate-orm", "6.5.2", "6.5.2.Final", Path("api/pom.xml"), via_maven=True,
+                origin="hibernate-core"),
     ]
     assert result.unrecognised == []
+
+
+JACKSON = product("jackson-databind", "Jackson Databind", ["pkg:maven/com.fasterxml.jackson.core/jackson-databind"])
+JACKSON_KEY = "maven:com.fasterxml.jackson.core/jackson-databind"
+COMPANY_POM_JACKSON = """<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <parent><groupId>com.acme</groupId><artifactId>acme-parent</artifactId><version>5</version></parent>
+  <artifactId>api</artifactId>
+  <properties><java.version>17</java.version></properties>
+  <dependencies>
+    <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId></dependency>
+  </dependencies>
+</project>"""
+EFFECTIVE_JACKSON = """<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <artifactId>api</artifactId>
+  <properties><java.version>17</java.version></properties>
+  <dependencies>
+    <dependency><groupId>com.fasterxml.jackson.core</groupId><artifactId>jackson-databind</artifactId><version>2.17.0</version></dependency>
+  </dependencies>
+</project>"""
+
+
+def detect_idx(root, runner, *products):
+    det = MavenDetector(runner=runner, tmp_dir=root)
+    return det.detect(root / "api/pom.xml", Context(root, use_maven=True, index=index(*products)))
+
+
+def test_fallback_fills_generic_gap(write_files, monkeypatch):
+    with_mvn(monkeypatch)
+    root = write_files({"api/pom.xml": COMPANY_POM_JACKSON})
+    result = detect_idx(root, FakeRunner(EFFECTIVE_JACKSON), JACKSON)
+    assert result.dependencies == [
+        Dependency(JACKSON_KEY, "jackson-databind", "2.17.0", "2.17.0", Path("api/pom.xml"), via_maven=True)]
+    assert result.unrecognised == []
+
+
+def test_generic_gap_without_maven(write_files, monkeypatch):
+    monkeypatch.setattr(maven_fallback.shutil, "which", lambda name: None)
+    root = write_files({"api/pom.xml": COMPANY_POM_JACKSON})
+    result = detect_idx(root, FakeRunner(), JACKSON)
+    assert result.unrecognised == [Unrecognised(
+        Path("api/pom.xml"), "Jackson Databind version is set by a parent pom or BOM (Maven not found)")]
+    assert result.dependencies == [Dependency(JACKSON_KEY, "jackson-databind", None, None, Path("api/pom.xml"))]
+
+
+def test_generic_gap_maven_without_the_dependency(write_files, monkeypatch):
+    with_mvn(monkeypatch)
+    root = write_files({"api/pom.xml": COMPANY_POM_JACKSON})
+    result = detect_idx(root, FakeRunner(), JACKSON)
+    assert result.unrecognised == [Unrecognised(
+        Path("api/pom.xml"), "Jackson Databind version is set by a parent pom or BOM")]
+    assert [d.version for d in result.dependencies] == [None]
 
 
 def test_versionless_declaration_without_maven(write_files, monkeypatch):

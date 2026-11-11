@@ -4,7 +4,9 @@ import pytest
 
 from eolchecker.detectors import DETECTORS, Context
 from eolchecker.detectors.maven import MavenDetector, java_version, read_pom
-from eolchecker.models import Finding, Unrecognised
+from eolchecker.models import Dependency, Finding, Unrecognised
+
+from ..fakes import index, product
 
 NS = 'xmlns="http://maven.apache.org/POM/4.0.0"'
 
@@ -39,8 +41,9 @@ def test_applies_to():
 def test_spring_boot_parent(write_files):
     root = write_files({"backend/pom.xml": pom(BOOT_PARENT + "<properties><java.version>17</java.version></properties>")})
     assert run(root, "backend/pom.xml").findings == [
-        Finding("Spring Boot", "spring-boot", "3.1.5", "3.1.5", Path("backend/pom.xml")),
-        Finding("Java", "eclipse-temurin", "17", "17", Path("backend/pom.xml")),
+        Finding("Spring Boot", "spring-boot", "3.1.5", "3.1.5", Path("backend/pom.xml"),
+                origin="spring-boot-starter-parent (parent)"),
+        Finding("Java", "eclipse-temurin", "17", "17", Path("backend/pom.xml"), origin="java.version"),
     ]
 
 
@@ -66,7 +69,8 @@ def test_java_from_compiler_plugin(write_files):
             "<artifactId>maven-compiler-plugin</artifactId><configuration><source>1.8</source>"
             "<target>1.8</target></configuration></plugin></plugins></build>")
     root = write_files({"pom.xml": pom(body)})
-    assert run(root).findings == [Finding("Java", "eclipse-temurin", "8", "1.8", Path("pom.xml"))]
+    assert run(root).findings == [Finding("Java", "eclipse-temurin", "8", "1.8", Path("pom.xml"),
+                                          origin="maven-compiler-plugin")]
 
 
 def test_explicit_libs(write_files):
@@ -207,3 +211,172 @@ def test_broken_xml_unrecognised(write_files):
 
 def test_registered():
     assert any(isinstance(d, MavenDetector) for d in DETECTORS)
+
+
+BOOT = product("spring-boot", "Spring Boot", ["pkg:maven/org.springframework.boot/spring-boot-starter-web"])
+JACKSON = product("jackson-databind", "Jackson Databind", ["pkg:maven/com.fasterxml.jackson.core/jackson-databind"])
+JACKSON_KEY = "maven:com.fasterxml.jackson.core/jackson-databind"
+JAVA17 = "<properties><java.version>17</java.version></properties>"
+COMPANY_PARENT = "<parent><groupId>com.acme</groupId><artifactId>acme-parent</artifactId><version>5</version></parent>"
+
+
+def run_idx(root, rel="pom.xml", *products, use_maven=False):
+    return MavenDetector().detect(root / rel, Context(root, use_maven=use_maven, index=index(*products)))
+
+
+def must_not_run(cmd, cwd):
+    raise AssertionError("Maven should not run")
+
+
+def plugin(group, artifact, version):
+    g = f"<groupId>{group}</groupId>" if group else ""
+    return f"<plugin>{g}<artifactId>{artifact}</artifactId><version>{version}</version></plugin>"
+
+
+def test_every_dependency_and_plugin_is_reported(write_files):
+    body = (JAVA17 + "<dependencies>"
+            + dep("org.projectlombok", "lombok", "1.18.30", "<scope>provided</scope>")
+            + dep("org.junit.jupiter", "junit-jupiter", "5.10.0", "<scope>test</scope>")
+            + "</dependencies><build><plugins>"
+            + plugin("org.jacoco", "jacoco-maven-plugin", "0.8.11")
+            + plugin(None, "maven-surefire-plugin", "3.2.5")
+            + "</plugins></build>")
+    result = run_idx(write_files({"pom.xml": pom(body)}))
+    src = Path("pom.xml")
+    assert result.dependencies == [
+        Dependency("maven:org.projectlombok/lombok", "lombok", "1.18.30", "1.18.30", src),
+        Dependency("maven:org.junit.jupiter/junit-jupiter", "junit-jupiter", "5.10.0", "5.10.0", src),
+        Dependency("maven:org.jacoco/jacoco-maven-plugin", "jacoco-maven-plugin", "0.8.11", "0.8.11", src),
+        Dependency("maven:org.apache.maven.plugins/maven-surefire-plugin", "maven-surefire-plugin",
+                   "3.2.5", "3.2.5", src),
+    ]
+    assert result.unrecognised == []
+
+
+def test_version_from_own_dependency_management(write_files):
+    body = ("<properties><java.version>17</java.version><jackson.version>2.15.2</jackson.version></properties>"
+            "<dependencyManagement><dependencies>"
+            + dep("com.fasterxml.jackson.core", "jackson-databind", "${jackson.version}")
+            + "</dependencies></dependencyManagement><dependencies>"
+            + dep("com.fasterxml.jackson.core", "jackson-databind") + "</dependencies>")
+    result = run_idx(write_files({"pom.xml": pom(body)}), "pom.xml", JACKSON)
+    assert result.dependencies == [Dependency(JACKSON_KEY, "jackson-databind", "2.15.2", "2.15.2", Path("pom.xml"))]
+    assert result.unrecognised == []
+
+
+def test_version_from_plugin_management(write_files):
+    body = (JAVA17 + "<build><pluginManagement><plugins>" + plugin(None, "maven-surefire-plugin", "3.2.5")
+            + "</plugins></pluginManagement><plugins><plugin><artifactId>maven-surefire-plugin</artifactId>"
+            "</plugin></plugins></build>")
+    [d] = run_idx(write_files({"pom.xml": pom(body)})).dependencies
+    assert (d.key, d.version) == ("maven:org.apache.maven.plugins/maven-surefire-plugin", "3.2.5")
+
+
+def test_managed_entries_alone_are_not_dependencies(write_files):
+    body = (JAVA17 + "<dependencyManagement><dependencies>"
+            + dep("com.fasterxml.jackson.core", "jackson-databind", "2.15.2")
+            + "</dependencies></dependencyManagement>")
+    result = run_idx(write_files({"pom.xml": pom(body)}), "pom.xml", JACKSON)
+    assert (result.dependencies, result.unrecognised) == ([], [])
+
+
+def test_starters_join_boot_row_without_gap(write_files):
+    body = BOOT_PARENT + "<properties><java.version>17</java.version></properties><dependencies>" + \
+        dep("org.springframework.boot", "spring-boot-starter-web") + "</dependencies>"
+    result = run_idx(write_files({"pom.xml": pom(body)}), "pom.xml", BOOT)
+    assert result.unrecognised == []
+    assert [(d.name, d.version) for d in result.dependencies] == [("spring-boot-starter-web", None)]
+
+
+def test_tracked_versionless_is_a_gap(write_files):
+    body = BOOT_PARENT + JAVA17 + "<dependencies>" + dep("com.fasterxml.jackson.core", "jackson-databind") \
+        + dep("com.fasterxml.jackson.core", "jackson-databind", extra="<classifier>x</classifier>") \
+        + "</dependencies>"
+    result = run_idx(write_files({"pom.xml": pom(body)}), "pom.xml", BOOT, JACKSON)
+    assert result.unrecognised == [Unrecognised(Path("pom.xml"), "Jackson Databind version is set by Spring Boot")]
+    assert [(d.name, d.version) for d in result.dependencies] == [("jackson-databind", None)] * 2
+
+
+def test_tracked_versionless_under_company_parent(write_files):
+    body = COMPANY_PARENT + JAVA17 + "<dependencies>" + dep("com.fasterxml.jackson.core", "jackson-databind") \
+        + "</dependencies>"
+    reading = read_pom(pom(body), Path("pom.xml"), {}, check_java=True, index=index(JACKSON))
+    assert reading.result.unrecognised == [
+        Unrecognised(Path("pom.xml"), "Jackson Databind version is set by a parent pom or BOM")]
+    assert reading.gap_components == {"Jackson Databind"}
+    assert reading.gaps[0][0] == JACKSON_KEY
+
+
+def test_tracked_unresolved_property_is_a_gap(write_files):
+    body = JAVA17 + "<dependencies>" + dep("com.fasterxml.jackson.core", "jackson-databind", "${jackson.version}") \
+        + "</dependencies>"
+    result = run_idx(write_files({"pom.xml": pom(body)}), "pom.xml", JACKSON)
+    assert result.unrecognised == [Unrecognised(Path("pom.xml"), "couldn't resolve ${jackson.version}")]
+
+
+def test_untracked_versionless_is_silent(write_files):
+    body = JAVA17 + "<dependencies>" + dep("org.projectlombok", "lombok") + "</dependencies>"
+    result = run_idx(write_files({"pom.xml": pom(body)}), "pom.xml", JACKSON)
+    assert result.unrecognised == []
+    assert result.dependencies == [Dependency("maven:org.projectlombok/lombok", "lombok", None, None, Path("pom.xml"))]
+
+
+def test_child_covered_by_parent_product_has_no_row(write_files):
+    root_pom = pom(BOOT_PARENT + "<groupId>com.acme</groupId><artifactId>shop</artifactId><version>1.0</version>"
+                   "<packaging>pom</packaging><properties><java.version>21</java.version></properties>")
+    child = pom("<parent><groupId>com.acme</groupId><artifactId>shop</artifactId><version>1.0</version></parent>"
+                "<artifactId>app</artifactId><dependencies>"
+                + dep("org.springframework.boot", "spring-boot-starter-web") + "</dependencies>")
+    root = write_files({"pom.xml": root_pom, "app/pom.xml": child})
+    det = MavenDetector(runner=must_not_run)
+    result = det.detect(root / "app/pom.xml", Context(root, use_maven=True, index=index(BOOT)))
+    assert (result.findings, result.unrecognised, result.dependencies) == ([], [], [])
+
+
+def test_child_gets_version_from_parent_dependency_management(write_files):
+    root_pom = pom("<groupId>com.acme</groupId><artifactId>shop</artifactId><version>1.0</version>"
+                   "<packaging>pom</packaging><properties><java.version>17</java.version></properties>"
+                   "<dependencyManagement><dependencies>"
+                   + dep("com.fasterxml.jackson.core", "jackson-databind", "2.15.2")
+                   + dep("org.hibernate.orm", "hibernate-core", "6.4.4.Final")
+                   + "</dependencies></dependencyManagement>")
+    child = pom("<parent><groupId>com.acme</groupId><artifactId>shop</artifactId><version>1.0</version></parent>"
+                "<artifactId>app</artifactId><dependencies>"
+                + dep("com.fasterxml.jackson.core", "jackson-databind")
+                + dep("org.hibernate.orm", "hibernate-core") + "</dependencies>")
+    root = write_files({"pom.xml": root_pom, "app/pom.xml": child})
+    det = MavenDetector(runner=must_not_run)
+    result = det.detect(root / "app/pom.xml", Context(root, use_maven=True, index=index(JACKSON)))
+    src = Path("app/pom.xml")
+    assert result.unrecognised == []
+    assert result.findings == [Finding("Hibernate ORM", "hibernate-orm", "6.4.4", "6.4.4.Final", src,
+                                       origin="hibernate-core")]
+    assert result.dependencies[0] == Dependency(JACKSON_KEY, "jackson-databind", "2.15.2", "2.15.2", src)
+
+
+def test_origins(write_files):
+    body = BOOT_PARENT + JAVA17
+    found = {f.component: f.origin for f in run_idx(write_files({"pom.xml": pom(body)})).findings}
+    assert found == {"Spring Boot": "spring-boot-starter-parent (parent)", "Java": "java.version"}
+
+
+def test_origins_from_boms_and_properties(write_files):
+    body = ("<properties><maven.compiler.release>21</maven.compiler.release>"
+            "<tomcat.version>10.1.30</tomcat.version></properties><dependencyManagement><dependencies>"
+            + dep("org.springframework.boot", "spring-boot-dependencies", "3.2.4", "<type>pom</type><scope>import</scope>")
+            + dep("org.springframework", "spring-framework-bom", "6.1.5", "<type>pom</type><scope>import</scope>")
+            + "</dependencies></dependencyManagement><dependencies>"
+            + dep("org.hibernate.orm", "hibernate-core", "6.4.1.Final") + "</dependencies>")
+    found = {f.component: f.origin for f in run_idx(write_files({"pom.xml": pom(body)})).findings}
+    assert found == {"Spring Boot": "spring-boot-dependencies", "Spring Framework": "spring-framework-bom",
+                     "Java": "maven.compiler.release", "Hibernate ORM": "hibernate-core",
+                     "Apache Tomcat": "tomcat.version"}
+
+
+def test_bom_import_is_not_a_managed_version(write_files):
+    body = (JAVA17 + "<dependencyManagement><dependencies>"
+            + dep("com.fasterxml.jackson", "jackson-bom", "2.15.2", "<type>pom</type><scope>import</scope>")
+            + "</dependencies></dependencyManagement><dependencies>"
+            + dep("com.fasterxml.jackson", "jackson-bom") + "</dependencies>")
+    [d] = run_idx(write_files({"pom.xml": pom(body)})).dependencies
+    assert d.version is None

@@ -1,4 +1,5 @@
-"""Spring Boot, Spring Framework, Java, Hibernate ORM and Tomcat from pom.xml."""
+"""Every dependency and plugin in pom.xml, plus the special cases Spring Boot, Spring Framework,
+Java, Hibernate ORM and Tomcat."""
 from __future__ import annotations
 
 import os
@@ -8,7 +9,8 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from ..models import DetectResult, Unrecognised, finding
+from ..catalog import PurlIndex, dep_key
+from ..models import DetectResult, Dependency, Unrecognised, finding
 from ..versions import normalise
 from . import Context
 from ._util import parse_error, rel
@@ -17,6 +19,9 @@ from .maven_fallback import Runner, effective_pom, find_maven, run_subprocess
 BOOT_GROUP = "org.springframework.boot"
 JAVA_PROPS = ("maven.compiler.release", "maven.compiler.source", "java.version")
 INHERITABLE = ("Spring Boot", "Java")
+# Products whose gaps the special-case code below already reports.
+SPECIAL_SLUGS = frozenset({"spring-boot", "spring-framework", "hibernate-orm", "tomcat"})
+DEFAULT_PLUGIN_GROUP = "org.apache.maven.plugins"
 _PROP_REF = re.compile(r"\$\{([^}]+)\}")
 
 
@@ -37,7 +42,10 @@ class PomReading:
     has_gaps: bool
     gap_components: set[str] = field(default_factory=set)
     props: dict[str, str] = field(default_factory=dict)  # merged properties, for child poms
-    gaps: list[tuple[str, Unrecognised]] = field(default_factory=list)  # (component, gap)
+    # (component, gap) for the special cases; (dependency key, gap) for other dependencies
+    gaps: list[tuple[str, Unrecognised]] = field(default_factory=list)
+    products: set[str] = field(default_factory=set)  # slugs reported with a version, here or by parents
+    managed: dict[str, str] = field(default_factory=dict)  # dependency key -> resolved managed version
 
 
 @dataclass(frozen=True)
@@ -45,12 +53,20 @@ class _Coord:
     group: str
     artifact: str
     version: str | None
-    section: str  # "dependency", "managed", "plugin"
+    section: str  # "dependency", "managed", "plugin", "managed-plugin"
+    scope: str | None = None
+
+    @property
+    def key(self) -> str:
+        return dep_key("maven", f"{self.group}/{self.artifact}")
 
 
 def read_pom(pom_xml: str | bytes, source: Path, parent_props: dict[str, str], *, check_java: bool,
-             inherited: dict[str, str] | None = None) -> PomReading:
-    """Read one pom. `inherited` holds Spring Boot / Java versions already covered by an in-repo parent."""
+             inherited: dict[str, str] | None = None, index: PurlIndex | None = None,
+             parent_products: frozenset[str] | set[str] = frozenset(),
+             parent_managed: dict[str, str] | None = None) -> PomReading:
+    """Read one pom. `inherited` holds Spring Boot / Java versions already covered by an in-repo parent;
+    `parent_products` and `parent_managed` the products and managed versions of the in-repo parent chain."""
     inherited = inherited or {}
     root = ET.fromstring(pom_xml)
 
@@ -64,15 +80,20 @@ def read_pom(pom_xml: str | bytes, source: Path, parent_props: dict[str, str], *
     props["project.version"] = _text(root, "version") or parent_version or ""
 
     coords = _coords(root)
+    parent_managed = parent_managed or {}
+    managed = dict(parent_managed)
+    managed.update(_managed(coords, props))
     result = DetectResult()
     gaps: list[tuple[str, Unrecognised]] = []
+    gap_components: set[str] = set()
 
-    def add_gap(component: str, reason: str) -> None:
+    def add_gap(component: str, reason: str, key: str | None = None) -> None:
         gap_entry = Unrecognised(source, reason)
         result.unrecognised.append(gap_entry)
-        gaps.append((component, gap_entry))
+        gaps.append((key or component, gap_entry))
+        gap_components.add(component)
 
-    def add(component: str, raw: str, parse=normalise) -> None:
+    def add(component: str, raw: str, origin: str, parse=normalise) -> None:
         value, missing = _resolve(raw, props)
         if missing:
             add_gap(component, f"couldn't resolve ${{{missing}}}")
@@ -81,61 +102,122 @@ def read_pom(pom_xml: str | bytes, source: Path, parent_props: dict[str, str], *
         if version is None:
             add_gap(component, f"couldn't read the {component} version")
             return
-        result.findings.append(finding(component, version, value, source))
+        result.findings.append(finding(component, version, value, source, origin=origin))
+
+    def first_versioned(matches, sections: set[str] | None = None) -> _Coord | None:
+        return next((c for c in coords if c.version and matches(c) and (sections is None or c.section in sections)),
+                    None)
 
     # Spring Boot
-    boot_raw = None
+    boot_raw = boot_origin = None
     if parent is not None and _text(parent, "groupId") == BOOT_GROUP \
             and _text(parent, "artifactId") == "spring-boot-starter-parent":
-        boot_raw = parent_version
-    boot_raw = boot_raw or _version_of(coords, BOOT_GROUP, {"spring-boot-dependencies"}, sections={"managed"})
-    boot_raw = boot_raw or next((c.version for c in coords if c.group == BOOT_GROUP and c.version), None)
+        boot_raw, boot_origin = parent_version, "spring-boot-starter-parent (parent)"
+    if not boot_raw:
+        c = first_versioned(lambda c: c.group == BOOT_GROUP and c.artifact == "spring-boot-dependencies",
+                            {"managed"}) or first_versioned(lambda c: c.group == BOOT_GROUP)
+        boot_raw, boot_origin = (c.version, c.artifact) if c else (None, None)
     uses_boot = boot_raw is not None or any(c.group == BOOT_GROUP for c in coords)
     if boot_raw:
-        add("Spring Boot", boot_raw)
+        add("Spring Boot", boot_raw, boot_origin)
     elif uses_boot and "Spring Boot" not in inherited:
         add_gap("Spring Boot", "couldn't read the Spring Boot version")
 
     boot_managed = boot_raw is not None or "Spring Boot" in inherited
 
+    def set_by(component: str) -> str:
+        return f"{component} version is set by " + ("Spring Boot" if boot_managed else "a parent pom or BOM")
+
     def declared_without_version(component: str, matches) -> None:
-        """Declared in <dependencies> but the version comes from a parent or BOM: a gap for Maven to fill."""
-        if any(c.section == "dependency" and not c.version and matches(c) for c in coords):
-            add_gap(component, f"{component} version is set by "
-                    + ("Spring Boot" if boot_managed else "a parent pom or BOM"))
+        """Declared in <dependencies> without a version: take it from an in-repo parent's
+        <dependencyManagement>, else it comes from a parent or BOM and is a gap for Maven to fill."""
+        declared = [c for c in coords if c.section == "dependency" and not c.version and matches(c)]
+        from_parent = next((c for c in declared if c.key in parent_managed), None)
+        if from_parent:
+            add(component, parent_managed[from_parent.key], from_parent.artifact)
+        elif declared:
+            add_gap(component, set_by(component))
+
+    def special(component: str, matches, bom: str | None = None) -> bool:
+        """Add `component` from a BOM import or a versioned coordinate; False if neither has a version."""
+        c = (first_versioned(lambda c: matches(c) and c.artifact == bom, {"managed"}) if bom else None) \
+            or first_versioned(matches)
+        if c:
+            add(component, c.version, c.artifact)
+        return c is not None
 
     # Spring Framework
     is_sf = lambda c: c.group == "org.springframework" and c.artifact.startswith("spring-")  # noqa: E731
-    sf_raw = _version_of(coords, "org.springframework", {"spring-framework-bom"}, sections={"managed"}) or next(
-        (c.version for c in coords if is_sf(c) and c.version), None)
-    if sf_raw:
-        add("Spring Framework", sf_raw)
-    else:
+    if not special("Spring Framework", is_sf, bom="spring-framework-bom"):
         declared_without_version("Spring Framework", is_sf)
 
     # Java
-    java_raw = next((own_props[k] for k in JAVA_PROPS if own_props.get(k)), None) or _compiler_setting(root)
+    java_prop = next((k for k in JAVA_PROPS if own_props.get(k)), None)
+    java_raw = own_props[java_prop] if java_prop else _compiler_setting(root)
     if java_raw:
-        add("Java", java_raw, parse=java_version)
+        add("Java", java_raw, java_prop or "maven-compiler-plugin", parse=java_version)
     elif check_java and _text(root, "packaging") != "pom" and "Java" not in inherited \
             and not any(props.get(k) for k in JAVA_PROPS):
         add_gap("Java", "couldn't read the Java version")
 
     # Hibernate ORM and Tomcat
     is_hib = lambda c: c.group in ("org.hibernate", "org.hibernate.orm") and c.artifact == "hibernate-core"  # noqa: E731
-    hib_raw = next((c.version for c in coords if is_hib(c) and c.version), None)
-    if hib_raw:
-        add("Hibernate ORM", hib_raw)
-    else:
+    if not special("Hibernate ORM", is_hib):
         declared_without_version("Hibernate ORM", is_hib)
-    tomcat_raw = _version_of(coords, "org.apache.tomcat.embed", {"tomcat-embed-core"}) or own_props.get("tomcat.version")
-    if tomcat_raw:
-        add("Apache Tomcat", tomcat_raw)
-    else:
-        declared_without_version(
-            "Apache Tomcat", lambda c: c.group == "org.apache.tomcat.embed" and c.artifact == "tomcat-embed-core")
+    is_tomcat = lambda c: c.group == "org.apache.tomcat.embed" and c.artifact == "tomcat-embed-core"  # noqa: E731
+    if not special("Apache Tomcat", is_tomcat):
+        if own_props.get("tomcat.version"):
+            add("Apache Tomcat", own_props["tomcat.version"], "tomcat.version")
+        else:
+            declared_without_version("Apache Tomcat", is_tomcat)
 
-    return PomReading(result, bool(gaps), {c for c, _ in gaps}, props, gaps)
+    # Every dependency and plugin
+    products = {f.product for f in result.findings} | set(parent_products)
+    deps, dep_gaps = _dependencies(coords, props, managed, index, parent_products, products, source, set_by)
+    result.dependencies.extend(deps)
+    for key, component, reason in dep_gaps:
+        if component not in gap_components:  # one gap per component per pom
+            add_gap(component, reason, key)
+    return PomReading(result, bool(gaps), gap_components, props, gaps, products, managed)
+
+
+def _dependencies(coords: list[_Coord], props: dict[str, str], managed: dict[str, str], index: PurlIndex | None,
+                  parent_products: frozenset[str] | set[str], products: set[str], source: Path,
+                  set_by) -> tuple[list[Dependency], list[tuple[str, str, str]]]:
+    """Every <dependency> and <plugin> as a Dependency, plus (key, component, reason) for each tracked
+    one whose version is not known here. Adds the products of versioned dependencies to `products`."""
+    deps: list[Dependency] = []
+    gaps: list[tuple[str, str, str]] = []
+    resolved = []
+    for c in coords:
+        if c.section not in ("dependency", "plugin") or not c.group or not c.artifact:
+            continue
+        raw = c.version or managed.get(c.key)
+        value, missing = _resolve(raw, props) if raw else (None, None)
+        version = None if missing or not value else normalise(value)
+        matches = index.resolve(c.key) if index is not None else []
+        if version:
+            products.update(m.product for m in matches)
+        resolved.append((c, value, missing, version, matches))
+
+    for c, value, missing, version, matches in resolved:
+        if version:
+            deps.append(Dependency(c.key, c.artifact, version, value, source))
+            continue
+        if matches and all(m.product in parent_products for m in matches):
+            continue  # the in-repo parent's row covers it
+        deps.append(Dependency(c.key, c.artifact, None, None, source))
+        if not matches or any(m.product in SPECIAL_SLUGS or m.product in products for m in matches):
+            continue  # untracked, reported by the special cases, or joins a versioned row
+        component = matches[0].component
+        if missing:
+            reason = f"couldn't resolve ${{{missing}}}"
+        elif value:
+            reason = f"couldn't read the {component} version"
+        else:
+            reason = set_by(component)
+        gaps.append((c.key, component, reason))
+    return deps, gaps
 
 
 class MavenDetector:
@@ -150,8 +232,9 @@ class MavenDetector:
         try:
             # Bytes, so the XML parser honours the file's own encoding declaration (e.g. ISO-8859-1).
             text = path.read_bytes()
-            props, inherited = _parent_chain(path, text, ctx.root)
-            reading = read_pom(text, rel(path, ctx), props, check_java=True, inherited=inherited)
+            props, inherited, products, managed = _parent_chain(path, text, ctx.root, ctx.index)
+            reading = read_pom(text, rel(path, ctx), props, check_java=True, inherited=inherited, index=ctx.index,
+                               parent_products=products, parent_managed=managed)
         except ET.ParseError:
             return parse_error(path, ctx)
         return self._after_direct_read(path, ctx, reading)
@@ -171,12 +254,21 @@ class MavenDetector:
         found = {}
         for f in effective.result.findings:
             found.setdefault(f.component, replace(f, via_maven=True))
+        found_deps = {}
+        for d in effective.result.dependencies:
+            if d.version:
+                found_deps.setdefault(d.key, replace(d, via_maven=True))
         result = DetectResult(findings=list(reading.result.findings))
-        for component, gap_entry in reading.gaps:
-            if component in found:
-                result.findings.append(found.pop(component))
+        filled = set()
+        for name, gap_entry in reading.gaps:  # name: a special-case component or a dependency key
+            if name in found:
+                result.findings.append(found.pop(name))
+            elif name in found_deps:
+                filled.add(name)
             else:
                 result.unrecognised.append(gap_entry)
+        result.dependencies = [found_deps[d.key] if d.key in filled and d.version is None else d
+                               for d in reading.result.dependencies]
         return result
 
 
@@ -200,40 +292,49 @@ def _with_suffix(reading: PomReading, suffix: str) -> DetectResult:
     return DetectResult(
         findings=list(reading.result.findings),
         unrecognised=[Unrecognised(u.source, u.reason + suffix) for _, u in reading.gaps],
+        dependencies=list(reading.result.dependencies),
     )
 
 
-def _parent_chain(path: Path, text: str | bytes, root: Path, depth: int = 0) -> tuple[dict[str, str], dict[str, str]]:
-    """Merged properties and inherited Spring Boot/Java versions from parent poms inside the repo."""
+_Chain = tuple[dict[str, str], dict[str, str], set[str], dict[str, str]]
+
+
+def _parent_chain(path: Path, text: str | bytes, root: Path, index: PurlIndex | None,
+                  depth: int = 0) -> _Chain:
+    """From parent poms inside the repo: merged properties, inherited Spring Boot/Java versions,
+    the products they report with a version, and their managed versions."""
+    none: _Chain = ({}, {}, set(), {})
     if depth > 10:
-        return {}, {}
+        return none
     try:
         parent = _first(ET.fromstring(text), "parent")
     except ET.ParseError:
-        return {}, {}
+        return none
     if parent is None:
-        return {}, {}
+        return none
     rel_el = _first(parent, "relativePath")
     if rel_el is not None and not (rel_el.text or "").strip():
-        return {}, {}  # <relativePath/> means: don't look locally
+        return none  # <relativePath/> means: don't look locally
     rel_path = (rel_el.text or "").strip() if rel_el is not None else "../pom.xml"
     candidate = Path(os.path.normpath(path.parent / rel_path))
     if candidate.is_dir():
         candidate = candidate / "pom.xml"
     root_abs = Path(os.path.normpath(root))
     if candidate == path or root_abs not in candidate.parents or not candidate.is_file():
-        return {}, {}
+        return none
     try:
         parent_text = candidate.read_bytes()
         if _text(ET.fromstring(parent_text), "artifactId") != _text(parent, "artifactId"):
-            return {}, {}
-        grand_props, grand_inherited = _parent_chain(candidate, parent_text, root, depth + 1)
-        reading = read_pom(parent_text, candidate, grand_props, check_java=False, inherited=grand_inherited)
+            return none
+        grand_props, grand_inherited, grand_products, grand_managed = _parent_chain(
+            candidate, parent_text, root, index, depth + 1)
+        reading = read_pom(parent_text, candidate, grand_props, check_java=False, inherited=grand_inherited,
+                           index=index, parent_products=grand_products, parent_managed=grand_managed)
     except ET.ParseError:
-        return {}, {}
+        return none
     inherited = dict(grand_inherited)
     inherited.update({f.component: f.version for f in reading.result.findings if f.component in INHERITABLE})
-    return reading.props, inherited
+    return reading.props, inherited, reading.products, reading.managed
 
 
 def _resolve(raw: str, props: dict[str, str]) -> tuple[str, str | None]:
@@ -253,19 +354,28 @@ def _coords(root: ET.Element) -> list[_Coord]:
         (("dependencies", "dependency"), "dependency"),
         (("dependencyManagement", "dependencies", "dependency"), "managed"),
         (("build", "plugins", "plugin"), "plugin"),
-        (("build", "pluginManagement", "plugins", "plugin"), "plugin"),
+        (("build", "pluginManagement", "plugins", "plugin"), "managed-plugin"),
     ]
     for path, section in paths:
+        default_group = DEFAULT_PLUGIN_GROUP if "plugin" in section else ""
         for el in _walk(root, path):
-            out.append(_Coord(_text(el, "groupId") or "", _text(el, "artifactId") or "", _text(el, "version"), section))
+            out.append(_Coord(_text(el, "groupId") or default_group, _text(el, "artifactId") or "",
+                              _text(el, "version"), section, _text(el, "scope")))
     return out
 
 
-def _version_of(coords: list[_Coord], group: str, artifacts: set[str], sections: set[str] | None = None) -> str | None:
+def _managed(coords: list[_Coord], props: dict[str, str]) -> dict[str, str]:
+    """Dependency key -> resolved version from <dependencyManagement> and <pluginManagement>.
+    BOM imports are not versions for other artifacts, so they are left out."""
+    out: dict[str, str] = {}
     for c in coords:
-        if c.group == group and c.artifact in artifacts and c.version and (sections is None or c.section in sections):
-            return c.version
-    return None
+        if c.section not in ("managed", "managed-plugin") or not c.group or not c.artifact or not c.version \
+                or c.scope == "import":
+            continue
+        value, missing = _resolve(c.version, props)
+        if not missing:
+            out.setdefault(c.key, value)
+    return out
 
 
 def _compiler_setting(root: ET.Element) -> str | None:
