@@ -43,6 +43,32 @@ def test_versionless_dependency_joins_row():
     assert row.version == "3.4.1"
 
 
+def test_origin_listed_once_when_also_a_dependency():
+    deps = [dep(WEB, "spring-boot-starter-web", "3.4.1"), dep(TEST, "spring-boot-starter-test", "3.4.1")]
+    f = finding("Spring Boot", "3.4.1", "3.4.1", POM, origin="spring-boot-starter-web")
+    [row] = build_rows([f], deps, index(BOOT))
+    assert row.dependencies == ("spring-boot-starter-web", "spring-boot-starter-test")
+
+
+def test_latest_is_highest_version_not_newest_release_date():
+    log4j = product("log4j", "Log4j", ["pkg:maven/org.apache.logging.log4j/log4j-core"],
+                    [rel("2.12", "2025-12-20", True, "2021-12-14", "2.12.4"),
+                     rel("2.26", "2025-11-01", False, None, "2.26.0"),
+                     rel("2.3", "2025-12-21", True, "2015-10-01", "2.3.2")])
+    deps = [dep("maven:org.apache.logging.log4j/log4j-core", "log4j-core", "2.12.1")]
+    [row] = build_rows([], deps, index(log4j))
+    assert row.latest == "2.26.0"
+
+
+def test_others_sorted_case_insensitively():
+    lower = product("alpha", "alpha", ["pkg:npm/alpha"], [rel("1", "2020-01-01", False, "2030-01-01", "1.0")])
+    upper = product("beta", "Beta", ["pkg:npm/beta"], [rel("1", "2020-01-01", False, "2030-01-01", "1.0")])
+    a = Path("a/package.json")
+    rows = build_rows([], [dep("npm:beta", "beta", "1.0", a), dep("npm:alpha", "alpha", "1.0", a)],
+                      index(lower, upper))
+    assert [r.component for r in rows] == ["alpha", "Beta"]
+
+
 def test_versionless_group_without_version_is_dropped():
     assert build_rows([], [dep(WEB, "spring-boot-starter-web", None)], index(BOOT)) == []
 

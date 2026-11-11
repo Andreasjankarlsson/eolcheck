@@ -2,6 +2,7 @@ import csv
 import io
 from pathlib import Path
 
+import pytest
 from rich.console import Console
 
 from eolchecker.models import Unrecognised
@@ -13,10 +14,46 @@ ROW = Row("Spring Boot", ("spring-boot-starter-test", "spring-boot-starter-web")
 DASH_ROW = Row("Java", (), "17", "pom.xml", "—", "—", "unknown version")
 
 
-def _out(rows, unrecognised=(), untracked=None) -> str:
+def _out(rows, unrecognised=(), untracked=None, width=200) -> str:
     buf = io.StringIO()
-    render("repo", rows, list(unrecognised), Console(file=buf, width=200), untracked)
+    render("repo", rows, list(unrecognised), Console(file=buf, width=width), untracked)
     return buf.getvalue()
+
+
+NARROW_ROWS = [
+    Row("Spring Boot", ("spring-boot-starter-parent (parent)", "spring-boot-starter-web",
+                        "spring-boot-starter-test"),
+        "3.2.0 (also 3.4.1)", "backend/service-a/pom.xml", "2024-11-23", "4.1.2", "END OF LIFE"),
+    Row("Java", ("maven.compiler.release",), "17", "backend/service-a/pom.xml", "2029-09-30", "27.0.1",
+        "supported"),
+    Row("Spring Framework", ("spring-core", "spring-context"), "6.1.2", "backend/service-a/pom.xml",
+        "2025-08-31", "7.0.1", "END OF LIFE"),
+]
+
+
+@pytest.mark.parametrize("width", [80, 100])
+def test_narrow_terminal_keeps_key_cells_whole(width):
+    lines = _out(NARROW_ROWS, width=width).splitlines()
+    assert all(len(line) <= width for line in lines)
+    # Component, Status and the file path are never broken; Version only wraps at its space.
+    for text in ["backend/service-a/pom.xml", "END OF LIFE", "Spring Boot", "Spring Framework", "supported",
+                 "3.2.0", "(also", "3.4.1)"]:
+        assert any(text in line for line in lines), text
+    assert sum("backend/service-a/pom.xml" in line for line in lines) == 3
+
+
+def test_100_columns_keeps_dates_and_dependency_names_readable():
+    out = _out(NARROW_ROWS, width=100)
+    for text in ["2024-11-23", "2029-09-30", "27.0.1", "spring-core,", "spring-context"]:
+        assert text in out
+    assert len(out.splitlines()) <= 15
+
+
+def test_cells_are_escaped():
+    row = Row("Spring [bold]Boot", ("a[/b]",), "[1.0]", "a[/b]/package.json", "[/x]", "[/y]", "supported")
+    out = _out([row])
+    for text in ["Spring [bold]Boot", "a[/b]/package.json", "[1.0]", "[/x]", "[/y]"]:
+        assert text in out
 
 
 def test_table_has_dependencies_column():

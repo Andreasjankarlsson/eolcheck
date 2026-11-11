@@ -36,8 +36,9 @@ def _match(version: str, releases: list[Release]) -> Release | None:
 def _newest_latest(releases: list[Release]) -> str:
     if not releases:
         return DASH
-    newest = max(releases, key=lambda r: r.release_date)
-    return _tidy(newest.latest or newest.name)
+    """The highest version across all cycles (not the cycle released last: maintenance
+    branches such as Log4j 2.12 keep getting releases after newer cycles)."""
+    return max((_tidy(r.latest or r.name) for r in releases), key=_vkey)
 
 
 def _tidy(version: str) -> str:
@@ -77,7 +78,7 @@ def _make_row(component: str, product: str, source: Path, origin: str,
             others.append(display)
     shown = lowest_display + (f" (also {', '.join(others)})" if others else "")
 
-    names = sorted({d.name for d in deps})
+    names = [n for n in sorted({d.name for d in deps}) if n != origin]
     if origin:
         names.insert(0, origin)
 
@@ -128,7 +129,7 @@ def build_rows(findings: list[Finding], dependencies: list[Dependency], index: P
             deps, any(d.via_maven for d in versioned), index))
 
     result = [r for r in rows if r is not None]
-    result.sort(key=lambda r: (r.found_in, _ORDER.get(r.component, 99), r.component))
+    result.sort(key=lambda r: (r.found_in, _ORDER.get(r.component, 99), r.component.casefold(), r.component))
     return result
 
 

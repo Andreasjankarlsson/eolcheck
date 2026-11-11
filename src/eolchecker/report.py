@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+from rich.cells import cell_len
 from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
@@ -20,6 +21,48 @@ STATUS_STYLE = {
 }
 
 CSV_HEADER = ["Component", "Dependencies", "Version", "Found in", "End of support", "Latest", "Status"]
+COMPONENT, DEPENDENCIES, VERSION, FOUND_IN, END_OF_SUPPORT, LATEST, STATUS = range(len(CSV_HEADER))
+_DEPENDENCIES_MIN = 18
+_SQUEEZED = 4  # End of support / Latest when space is very short
+_NARROW_GAP = "narrow gap"
+
+# When the table is too wide, columns shrink in this order, each down to its floor:
+# "token" is the longest word in the column (so it only wraps between words), a number is
+# a width in characters. _NARROW_GAP drops the space between columns from two to one.
+# Component and Status never shrink, and Found in never breaks inside a path.
+_SHRINK = [
+    (DEPENDENCIES, _DEPENDENCIES_MIN), (END_OF_SUPPORT, "token"), (LATEST, "token"),
+    (VERSION, "token"), (FOUND_IN, "token"), _NARROW_GAP,
+    (END_OF_SUPPORT, _SQUEEZED), (LATEST, _SQUEEZED), (DEPENDENCIES, 1),
+]
+
+
+def _cells(r: Row) -> list[str]:
+    return [r.component, ", ".join(r.dependencies), r.version, r.found_in, r.end_of_support, r.latest, r.status]
+
+
+def _layout(rows: list[list[str]], width: int) -> tuple[list[int], int]:
+    """Content width per column and the gap between columns, so the table fits `width`."""
+    columns = list(zip(CSV_HEADER, *rows))
+    natural = [max(cell_len(c) for c in col) for col in columns]
+    widths = list(natural)
+    tokens = [max(cell_len(w) for c in col for w in c.split() or [""]) for col in columns]
+    gap = 2
+    for step in _SHRINK:
+        excess = sum(widths) + gap * (len(CSV_HEADER) - 1) - width
+        if excess <= 0:
+            break
+        if step == _NARROW_GAP:
+            gap = 1
+            continue
+        col, floor = step
+        floor = tokens[col] if floor == "token" else floor
+        if widths[col] > floor:
+            widths[col] = max(floor, widths[col] - excess)
+    spare = width - sum(widths) - gap * (len(CSV_HEADER) - 1)
+    if spare > 0:  # a step can overshoot; give the rest back to Dependencies
+        widths[DEPENDENCIES] = min(natural[DEPENDENCIES], widths[DEPENDENCIES] + spare)
+    return widths, gap
 
 
 def render(repo_name: str, rows: list[Row], unrecognised: list[Unrecognised], console: Console,
@@ -27,18 +70,17 @@ def render(repo_name: str, rows: list[Row], unrecognised: list[Unrecognised], co
     console.print()
     console.print(f"[bold]{escape(repo_name)}[/bold]")
     if rows:
-        table = Table(box=None, padding=(0, 2), header_style="bold")
-        for col in ["Component", "Dependencies", "Version", "Found in", "End of support", "Latest", "Status"]:
-            if col == "Dependencies":
-                table.add_column(col, no_wrap=False, overflow="fold")
-            elif col == "Found in":
-                table.add_column(col, overflow="fold")
-            else:
-                table.add_column(col, no_wrap=True, overflow="ignore")
-        for r in rows:
+        cells = [_cells(r) for r in rows]
+        widths, gap = _layout(cells, console.width)
+        # Right padding 1, left padding gap - 1: `gap` spaces between columns, none at the edges.
+        table = Table(box=None, padding=(0, 1, 0, gap - 1), pad_edge=False, header_style="bold")
+        for col, width in zip(CSV_HEADER, widths):
+            table.add_column(col, width=width, overflow="fold")
+        for r, row_cells in zip(rows, cells):
             style = STATUS_STYLE.get(r.status, "")
-            table.add_row(r.component, escape(", ".join(r.dependencies)), r.version, r.found_in, r.end_of_support, r.latest,
-                          f"[{style}]{escape(r.status)}[/{style}]" if style else escape(r.status))
+            status = escape(r.status)
+            table.add_row(*[escape(c) for c in row_cells[:STATUS]],
+                          f"[{style}]{status}[/{style}]" if style else status)
         console.print(table)
     if unrecognised:
         console.print()
