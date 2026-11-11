@@ -85,7 +85,8 @@ class DotnetDetector:
 
 def _properties(path: Path) -> dict[str, str]:
     """All <PropertyGroup> values in an MSBuild file, ignoring XML namespaces."""
-    root = ET.fromstring(read_text(path))
+    # Bytes, so the XML parser honours the file's own encoding (UTF-16 in some older Visual Studio files).
+    root = ET.fromstring(path.read_bytes())
     out: dict[str, str] = {}
     for group in root.iter():
         if _local(group.tag) != "PropertyGroup":

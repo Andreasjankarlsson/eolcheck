@@ -127,5 +127,12 @@ def test_bom_csproj(write_files):
     assert f.version == "8.0"
 
 
+def test_utf16_csproj(tmp_path):
+    xml = '<?xml version="1.0" encoding="utf-16"?>' + sdk_project("<TargetFramework>net48</TargetFramework>")
+    (tmp_path / "Old.csproj").write_bytes(xml.encode("utf-16"))
+    [f] = run(tmp_path, "Old.csproj").findings
+    assert (f.component, f.version) == (".NET Framework", "4.8")
+
+
 def test_registered():
     assert any(isinstance(d, DotnetDetector) for d in DETECTORS)

@@ -158,6 +158,13 @@ def test_aggregator_pom_no_java_gap(write_files):
     assert (result.findings, result.unrecognised) == ([], [])
 
 
+def test_latin1_pom(tmp_path):
+    xml = ('<?xml version="1.0" encoding="ISO-8859-1"?><project><name>José</name>' + BOOT_PARENT
+           + "<properties><java.version>11</java.version></properties></project>")
+    (tmp_path / "pom.xml").write_bytes(xml.encode("iso-8859-1"))
+    assert [(f.component, f.version) for f in run(tmp_path).findings] == [("Spring Boot", "3.1.5"), ("Java", "11")]
+
+
 def test_broken_xml_unrecognised(write_files):
     root = write_files({"pom.xml": "<project><dependencies>"})
     assert run(root).unrecognised == [Unrecognised(Path("pom.xml"), "couldn't parse pom.xml")]

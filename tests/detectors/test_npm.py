@@ -50,8 +50,26 @@ def test_lockfile_v1(write_files):
     assert f.version == "16.14.0"
 
 
+def test_non_workspace_subapp_ignores_root_lock(write_files):
+    lock = {"lockfileVersion": 3, "packages": {"": {}, "node_modules/react": {"version": "18.3.1"}}}
+    root = write_files({"package.json": pkg({"react": "^18.2.0"}), "package-lock.json": json.dumps(lock),
+                        "legacy/package.json": pkg({"react": "^16.14.0"})})
+    [f] = run(root, "legacy/package.json").findings
+    assert (f.version, f.display) == ("16.14.0", "^16.14.0")
+
+
+def test_non_workspace_subapp_ignores_root_v1_lock(write_files):
+    lock = {"lockfileVersion": 1, "dependencies": {"react": {"version": "18.3.1"}}}
+    root = write_files({"package.json": pkg({"react": "^18.2.0"}), "package-lock.json": json.dumps(lock),
+                        "legacy/package.json": pkg({"react": "^16.14.0"})})
+    [f] = run(root, "legacy/package.json").findings
+    assert f.version == "16.14.0"
+
+
 def test_lock_at_workspace_root(write_files):
-    lock = {"lockfileVersion": 3, "packages": {"node_modules/react": {"version": "18.3.1"}}}
+    # npm records workspace members as a "packages" key with their folder path.
+    lock = {"lockfileVersion": 3, "packages": {"apps/web": {"name": "web"},
+                                               "node_modules/react": {"version": "18.3.1"}}}
     root = write_files({"package-lock.json": json.dumps(lock),
                         "apps/web/package.json": pkg({"react": "^18.2.0"})})
     [f] = run(root, "apps/web/package.json").findings

@@ -120,10 +120,18 @@ class _Lock:
         data = self._load_json()
         packages = data.get("packages") or {}
         sub = pkg_dir.relative_to(self.path.parent).as_posix()
-        keys = ([f"{sub}/node_modules/{name}"] if sub != "." else []) + [f"node_modules/{name}"]
+        if sub != ".":
+            # A lock file higher up only covers this package if it lists it as a workspace member.
+            if sub not in packages:
+                return None
+            keys = [f"{sub}/node_modules/{name}", f"node_modules/{name}"]
+        else:
+            keys = [f"node_modules/{name}"]
         for key in keys:
             if key in packages:
                 return packages[key].get("version")
+        if sub != ".":
+            return None
         dep = (data.get("dependencies") or {}).get(name)
         return dep.get("version") if isinstance(dep, dict) else None
 

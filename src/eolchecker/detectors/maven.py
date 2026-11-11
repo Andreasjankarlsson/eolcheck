@@ -10,7 +10,7 @@ from pathlib import Path
 from ..models import DetectResult, Unrecognised, finding
 from ..versions import normalise
 from . import Context
-from ._util import parse_error, read_text, rel
+from ._util import parse_error, rel
 from .maven_fallback import Runner, effective_pom, find_maven, run_subprocess
 
 BOOT_GROUP = "org.springframework.boot"
@@ -47,7 +47,7 @@ class _Coord:
     section: str  # "dependency", "managed", "plugin"
 
 
-def read_pom(pom_xml: str, source: Path, parent_props: dict[str, str], *, check_java: bool,
+def read_pom(pom_xml: str | bytes, source: Path, parent_props: dict[str, str], *, check_java: bool,
              inherited: dict[str, str] | None = None) -> PomReading:
     """Read one pom. `inherited` holds Spring Boot / Java versions already covered by an in-repo parent."""
     inherited = inherited or {}
@@ -132,7 +132,8 @@ class MavenDetector:
 
     def detect(self, path: Path, ctx: Context) -> DetectResult:
         try:
-            text = read_text(path)
+            # Bytes, so the XML parser honours the file's own encoding declaration (e.g. ISO-8859-1).
+            text = path.read_bytes()
             props, inherited = _parent_chain(path, text, ctx.root)
             reading = read_pom(text, rel(path, ctx), props, check_java=True, inherited=inherited)
         except ET.ParseError:
@@ -185,7 +186,7 @@ def _with_suffix(reading: PomReading, suffix: str) -> DetectResult:
     )
 
 
-def _parent_chain(path: Path, text: str, root: Path, depth: int = 0) -> tuple[dict[str, str], dict[str, str]]:
+def _parent_chain(path: Path, text: str | bytes, root: Path, depth: int = 0) -> tuple[dict[str, str], dict[str, str]]:
     """Merged properties and inherited Spring Boot/Java versions from parent poms inside the repo."""
     if depth > 10:
         return {}, {}
@@ -206,7 +207,7 @@ def _parent_chain(path: Path, text: str, root: Path, depth: int = 0) -> tuple[di
     if candidate == path or root_abs not in candidate.parents or not candidate.is_file():
         return {}, {}
     try:
-        parent_text = read_text(candidate)
+        parent_text = candidate.read_bytes()
         if _text(ET.fromstring(parent_text), "artifactId") != _text(parent, "artifactId"):
             return {}, {}
         grand_props, grand_inherited = _parent_chain(candidate, parent_text, root, depth + 1)
