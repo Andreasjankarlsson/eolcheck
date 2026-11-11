@@ -52,7 +52,8 @@ class DotnetDetector:
                 result.unrecognised.append(Unrecognised(rel(props_file, ctx), f"couldn't parse {PROPS}"))
         props.update(project_props)
 
-        raw = props.get("TargetFrameworks") or props.get("TargetFramework") or props.get("TargetFrameworkVersion")
+        origin = next((p for p in ("TargetFrameworks", "TargetFramework", "TargetFrameworkVersion") if props.get(p)), "")
+        raw = props.get(origin)
         source = rel(path, ctx)
         if not raw:
             result.unrecognised.append(Unrecognised(source, NO_TARGET))
@@ -67,7 +68,7 @@ class DotnetDetector:
                 result.unrecognised.append(Unrecognised(source, NO_TARGET))
                 continue
             component, version = parsed
-            result.findings.append(finding(component, version, tfm, source))
+            result.findings.append(finding(component, version, tfm, source, origin=origin))
         return result
 
     def _global_json(self, path: Path, ctx: Context) -> DetectResult:
@@ -81,7 +82,7 @@ class DotnetDetector:
         version = normalise(sdk)
         if version is None:
             return DetectResult(unrecognised=[Unrecognised(rel(path, ctx), "couldn't read the .NET SDK version")])
-        return DetectResult(findings=[finding(".NET", version, f"SDK {sdk}", rel(path, ctx))])
+        return DetectResult(findings=[finding(".NET", version, f"SDK {sdk}", rel(path, ctx), origin="global.json")])
 
 
 def _properties(path: Path) -> dict[str, str]:

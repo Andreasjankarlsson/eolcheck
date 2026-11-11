@@ -40,13 +40,14 @@ def test_applies_to():
 def test_sdk_style_csproj(write_files):
     root = write_files({"api/Api.csproj": sdk_project("<TargetFramework>net8.0</TargetFramework>")})
     assert run(root, "api/Api.csproj").findings == [
-        Finding(".NET", "dotnet", "8.0", "net8.0", Path("api/Api.csproj"))]
+        Finding(".NET", "dotnet", "8.0", "net8.0", Path("api/Api.csproj"), origin="TargetFramework")]
 
 
 def test_multi_target(write_files):
     root = write_files({"Lib.csproj": sdk_project("<TargetFrameworks>net8.0;net48;netstandard2.0</TargetFrameworks>")})
-    found = [(f.component, f.version, f.display) for f in run(root, "Lib.csproj").findings]
-    assert found == [(".NET", "8.0", "net8.0"), (".NET Framework", "4.8", "net48")]
+    found = [(f.component, f.version, f.display, f.origin) for f in run(root, "Lib.csproj").findings]
+    assert found == [(".NET", "8.0", "net8.0", "TargetFrameworks"),
+                     (".NET Framework", "4.8", "net48", "TargetFrameworks")]
 
 
 def test_old_style_namespaced(write_files):
@@ -55,7 +56,8 @@ def test_old_style_namespaced(write_files):
            '<PropertyGroup><TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion></PropertyGroup></Project>')
     root = write_files({"Web/Web.csproj": xml})
     assert run(root, "Web/Web.csproj").findings == [
-        Finding(".NET Framework", "dotnetfx", "4.7.2", "v4.7.2", Path("Web/Web.csproj"))]
+        Finding(".NET Framework", "dotnetfx", "4.7.2", "v4.7.2", Path("Web/Web.csproj"),
+                origin="TargetFrameworkVersion")]
 
 
 def test_directory_build_props(write_files):
@@ -64,7 +66,8 @@ def test_directory_build_props(write_files):
         "src/A/A.csproj": '<Project Sdk="Microsoft.NET.Sdk"></Project>',
     })
     assert run(root, "src/A/A.csproj").findings == [
-        Finding(".NET", "dotnet", "6.0", "net6.0", Path("src/A/A.csproj"))]
+        Finding(".NET", "dotnet", "6.0", "net6.0", Path("src/A/A.csproj"),
+                origin="TargetFramework")]
 
 
 def test_nearest_props_wins(write_files):
@@ -107,7 +110,8 @@ def test_netstandard_only_silent(write_files):
 def test_global_json(write_files):
     root = write_files({"global.json": json.dumps({"sdk": {"version": "8.0.100"}})})
     assert run(root, "global.json").findings == [
-        Finding(".NET", "dotnet", "8.0.100", "SDK 8.0.100", Path("global.json"))]
+        Finding(".NET", "dotnet", "8.0.100", "SDK 8.0.100", Path("global.json"),
+                origin="global.json")]
 
 
 def test_global_json_without_sdk_silent(write_files):
