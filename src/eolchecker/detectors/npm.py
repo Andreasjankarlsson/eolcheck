@@ -1,4 +1,4 @@
-"""Angular, AngularJS, React, Next.js and Node.js from package.json and friends."""
+"""Every npm dependency, plus the Node.js runtime, from package.json and friends."""
 from __future__ import annotations
 
 import json
@@ -7,17 +7,11 @@ from pathlib import Path
 
 import yaml
 
-from ..models import DetectResult, finding
+from ..models import DetectResult, Dependency, finding
 from ..versions import is_range, lowest, normalise
 from . import Context
 from ._util import dirs_up, gap, parse_error, read_text, rel
 
-PACKAGES = {
-    "@angular/core": "Angular",
-    "angular": "AngularJS",
-    "react": "React",
-    "next": "Next.js",
-}
 LOCK_FILES = ("package-lock.json", "yarn.lock", "pnpm-lock.yaml")
 DEP_SECTIONS = ("dependencies", "devDependencies", "peerDependencies")
 
@@ -50,20 +44,18 @@ class NpmDetector:
         result = DetectResult()
         source = rel(path, ctx)
         lock = _Lock.find(path.parent, ctx.root)
-        for name, component in PACKAGES.items():
-            declared = _declared(data, name)
-            if declared is None:
-                continue
+        for name, declared in _declared(data).items():
             locked = lock.version(name, declared, path.parent) if lock else None
             if locked:
-                result.findings.append(finding(component, locked, locked, source))
+                result.dependencies.append(Dependency("npm", name, locked, locked, source))
                 continue
             version = lowest(declared)
             if version is None:
-                result.unrecognised.append(gap(path, ctx, component))
+                result.dependencies.append(Dependency(
+                    "npm", name, None, declared, source, missing=f"'{declared}' isn't a version"))
                 continue
             display = declared if is_range(declared) else version
-            result.findings.append(finding(component, version, display, source))
+            result.dependencies.append(Dependency("npm", name, version, display, source))
 
         engines = data.get("engines")
         node = engines.get("node") if isinstance(engines, dict) else None
@@ -76,12 +68,16 @@ class NpmDetector:
         return result
 
 
-def _declared(data: dict, name: str) -> str | None:
+def _declared(data: dict) -> dict[str, str]:
+    """Every declared name with its version string; the first section wins on duplicates."""
+    found: dict[str, str] = {}
     for section in DEP_SECTIONS:
         deps = data.get(section)
-        if isinstance(deps, dict) and isinstance(deps.get(name), str):
-            return deps[name]
-    return None
+        if isinstance(deps, dict):
+            for name, declared in deps.items():
+                if isinstance(declared, str):
+                    found.setdefault(name, declared)
+    return found
 
 
 class _Lock:

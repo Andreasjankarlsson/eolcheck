@@ -3,7 +3,7 @@ from pathlib import Path
 
 from eolchecker.detectors import Context
 from eolchecker.detectors.npm import NpmDetector
-from eolchecker.models import Finding, Unrecognised
+from eolchecker.models import Dependency, Finding, Unrecognised
 
 
 def run(root: Path, rel: str):
@@ -29,41 +29,46 @@ def test_applies_to():
     assert not d.applies_to(Path("package-lock.json"))
 
 
+def dep(result, name):
+    [d] = [d for d in result.dependencies if d.name == name]
+    return d
+
+
 def test_angular_from_package_json_without_lock(write_files):
     root = write_files({"frontend/package.json": pkg({"@angular/core": "^16.2.0"})})
-    assert run(root, "frontend/package.json").findings == [
-        Finding("Angular", "angular", "16.2.0", "^16.2.0", Path("frontend/package.json"))]
+    assert Dependency("npm", "@angular/core", "16.2.0", "^16.2.0", Path("frontend/package.json")) \
+        in run(root, "frontend/package.json").dependencies
 
 
 def test_lockfile_wins(write_files):
     lock = {"lockfileVersion": 3, "packages": {"node_modules/@angular/core": {"version": "16.2.12"}}}
     root = write_files({"frontend/package.json": pkg({"@angular/core": "^16.2.0"}),
                         "frontend/package-lock.json": json.dumps(lock)})
-    [f] = run(root, "frontend/package.json").findings
-    assert (f.version, f.display) == ("16.2.12", "16.2.12")
+    [d] = run(root, "frontend/package.json").dependencies
+    assert (d.version, d.display) == ("16.2.12", "16.2.12")
 
 
 def test_lockfile_v1(write_files):
     lock = {"lockfileVersion": 1, "dependencies": {"react": {"version": "16.14.0"}}}
     root = write_files({"package.json": pkg({"react": "^16.8.0"}), "package-lock.json": json.dumps(lock)})
-    [f] = run(root, "package.json").findings
-    assert f.version == "16.14.0"
+    [d] = run(root, "package.json").dependencies
+    assert d.version == "16.14.0"
 
 
 def test_non_workspace_subapp_ignores_root_lock(write_files):
     lock = {"lockfileVersion": 3, "packages": {"": {}, "node_modules/react": {"version": "18.3.1"}}}
     root = write_files({"package.json": pkg({"react": "^18.2.0"}), "package-lock.json": json.dumps(lock),
                         "legacy/package.json": pkg({"react": "^16.14.0"})})
-    [f] = run(root, "legacy/package.json").findings
-    assert (f.version, f.display) == ("16.14.0", "^16.14.0")
+    [d] = run(root, "legacy/package.json").dependencies
+    assert (d.version, d.display) == ("16.14.0", "^16.14.0")
 
 
 def test_non_workspace_subapp_ignores_root_v1_lock(write_files):
     lock = {"lockfileVersion": 1, "dependencies": {"react": {"version": "18.3.1"}}}
     root = write_files({"package.json": pkg({"react": "^18.2.0"}), "package-lock.json": json.dumps(lock),
                         "legacy/package.json": pkg({"react": "^16.14.0"})})
-    [f] = run(root, "legacy/package.json").findings
-    assert f.version == "16.14.0"
+    [d] = run(root, "legacy/package.json").dependencies
+    assert d.version == "16.14.0"
 
 
 def test_lock_at_workspace_root(write_files):
@@ -72,8 +77,8 @@ def test_lock_at_workspace_root(write_files):
                                                "node_modules/react": {"version": "18.3.1"}}}
     root = write_files({"package-lock.json": json.dumps(lock),
                         "apps/web/package.json": pkg({"react": "^18.2.0"})})
-    [f] = run(root, "apps/web/package.json").findings
-    assert (f.version, f.source) == ("18.3.1", Path("apps/web/package.json"))
+    [d] = run(root, "apps/web/package.json").dependencies
+    assert (d.version, d.source) == ("18.3.1", Path("apps/web/package.json"))
 
 
 def test_yarn_classic_lock(write_files):
@@ -81,45 +86,59 @@ def test_yarn_classic_lock(write_files):
             'react@^17.0.0:\n  version "17.0.1"\n\n'
             '"react@^18.2.0", react@^18.0.0:\n  version "18.2.0"\n  resolved "x"\n')
     root = write_files({"package.json": pkg({"react": "^18.2.0"}), "yarn.lock": yarn})
-    [f] = run(root, "package.json").findings
-    assert f.version == "18.2.0"
+    [d] = run(root, "package.json").dependencies
+    assert d.version == "18.2.0"
 
 
 def test_yarn_berry_lock(write_files):
     yarn = '__metadata:\n  version: 6\n\n"react@npm:^18.2.0":\n  version: 18.3.1\n  resolution: "react@npm:18.3.1"\n'
     root = write_files({"package.json": pkg({"react": "^18.2.0"}), "yarn.lock": yarn})
-    [f] = run(root, "package.json").findings
-    assert f.version == "18.3.1"
+    [d] = run(root, "package.json").dependencies
+    assert d.version == "18.3.1"
 
 
 def test_pnpm_lock(write_files):
     pnpm = ("lockfileVersion: '9.0'\nimporters:\n  apps/web:\n    dependencies:\n"
             "      next:\n        specifier: ^14.1.0\n        version: 14.2.3(react@18.3.1)\n")
     root = write_files({"pnpm-lock.yaml": pnpm, "apps/web/package.json": pkg({"next": "^14.1.0"})})
-    [f] = run(root, "apps/web/package.json").findings
-    assert (f.component, f.version) == ("Next.js", "14.2.3")
+    [d] = run(root, "apps/web/package.json").dependencies
+    assert (d.name, d.version) == ("next", "14.2.3")
 
 
 def test_angularjs_react_next_and_engines(write_files):
     root = write_files({"package.json": pkg({"angular": "1.8.3", "react": "18.2.0"},
                                             dev={"next": "14.0.0"}, engines={"node": ">=18"})})
-    found = {f.component: f for f in run(root, "package.json").findings}
-    assert set(found) == {"AngularJS", "React", "Next.js", "Node.js"}
-    assert (found["Node.js"].version, found["Node.js"].display) == ("18", ">=18")
-    assert found["AngularJS"].version == "1.8.3"
-
-
-def test_latest_tag_is_unrecognised(write_files):
-    root = write_files({"package.json": pkg({"next": "latest"})})
     result = run(root, "package.json")
-    assert result.findings == []
-    assert result.unrecognised == [Unrecognised(Path("package.json"), "couldn't read the Next.js version")]
+    assert {d.name for d in result.dependencies} == {"angular", "react", "next"}
+    assert dep(result, "angular").version == "1.8.3"
+    [node] = result.findings
+    assert (node.component, node.version, node.display) == ("Node.js", "18", ">=18")
 
 
-def test_package_json_without_frameworks_is_silent(write_files):
-    root = write_files({"package.json": pkg({"lodash": "^4"})})
+def test_unreadable_version_is_kept_with_reason(write_files):
+    root = write_files({"package.json": pkg({"react": "latest"})})
     result = run(root, "package.json")
-    assert (result.findings, result.unrecognised) == ([], [])
+    assert result.dependencies == [
+        Dependency("npm", "react", None, "latest", Path("package.json"), missing="'latest' isn't a version")]
+    assert result.unrecognised == []
+
+
+def test_every_dependency_is_listed(write_files):
+    root = write_files({"package.json": json.dumps(
+        {"dependencies": {"left-pad": "^1.3.0"}, "devDependencies": {"jest": "29.7.0"}})})
+    result = run(root, "package.json")
+    assert {d.name for d in result.dependencies} == {"left-pad", "jest"}
+    left_pad = dep(result, "left-pad")
+    assert (left_pad.version, left_pad.display) == ("1.3.0", "^1.3.0")
+
+
+def test_first_section_wins_and_non_strings_are_skipped(write_files):
+    root = write_files({"package.json": json.dumps(
+        {"dependencies": {"a": "1.0.0", "b": 5}, "devDependencies": {"a": "2.0.0"},
+         "peerDependencies": {"c": "3.0.0"}})})
+    result = run(root, "package.json")
+    assert {d.name for d in result.dependencies} == {"a", "c"}
+    assert dep(result, "a").version == "1.0.0"
 
 
 def test_nvmrc(write_files):
@@ -141,8 +160,8 @@ def test_nvmrc_lts_alias_unrecognised(write_files):
 
 def test_bom_is_accepted(write_files):
     root = write_files({"package.json": "﻿" + pkg({"react": "18.2.0"})})
-    [f] = run(root, "package.json").findings
-    assert f.version == "18.2.0"
+    [d] = run(root, "package.json").dependencies
+    assert d.version == "18.2.0"
 
 
 def test_broken_json_unrecognised(write_files):
