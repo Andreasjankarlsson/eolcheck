@@ -1,24 +1,11 @@
 """Client for the endoflife.date v1 API."""
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import httpx
 
+from .catalogue import ApiUnavailable, Release
+
 BASE_URL = "https://endoflife.date/api/v1"
-
-
-@dataclass(frozen=True)
-class Release:
-    name: str
-    release_date: str
-    is_eol: bool
-    eol_from: str | None
-    latest: str | None
-
-
-class ApiUnavailable(Exception):
-    """endoflife.date could not be reached or returned something unusable."""
 
 
 class EolClient:
