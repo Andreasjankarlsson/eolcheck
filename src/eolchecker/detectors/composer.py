@@ -1,19 +1,13 @@
-"""PHP, Laravel and Symfony from composer.json / composer.lock."""
+"""Every Composer dependency, plus the PHP runtime, from composer.json / composer.lock."""
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-from ..models import DetectResult, finding
+from ..models import DetectResult, Dependency, finding
 from ..versions import is_range, lowest, normalise
 from . import Context
 from ._util import gap, parse_error, read_text, rel
-
-# Component -> package names to look for, first match wins.
-PACKAGES = {
-    "Laravel": ("laravel/framework",),
-    "Symfony": ("symfony/framework-bundle", "symfony/http-kernel"),
-}
 
 
 class ComposerDetector:
@@ -38,12 +32,24 @@ class ComposerDetector:
         if isinstance(php, str):
             _add(result, "PHP", php, None, path, ctx, source)
 
-        for component, names in PACKAGES.items():
-            for name in names:
-                if isinstance(require.get(name), str):
-                    _add(result, component, require[name], locked.get(name), path, ctx, source)
-                    break
+        require_dev = data.get("require-dev") if isinstance(data.get("require-dev"), dict) else {}
+        declared_all: dict[str, str] = {}
+        for section in (require, require_dev):
+            for name, declared in section.items():
+                if "/" in name and isinstance(declared, str):
+                    declared_all.setdefault(name, declared)
+        for name, declared in declared_all.items():
+            result.dependencies.append(_dependency(name, declared, locked.get(name), source))
         return result
+
+
+def _dependency(name: str, declared: str, locked: str | None, source: Path) -> Dependency:
+    if locked:
+        return Dependency("Composer", name, locked, locked, source)
+    version = lowest(declared)
+    if version is None:
+        return Dependency("Composer", name, None, declared, source, missing=f"'{declared}' isn't a version")
+    return Dependency("Composer", name, version, declared if is_range(declared) else version, source)
 
 
 def _add(result: DetectResult, component: str, declared: str, locked: str | None,
