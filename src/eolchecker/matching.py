@@ -1,6 +1,7 @@
 """Match detected dependencies to endoflife.date products by package URL."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from urllib.parse import unquote
 
@@ -105,3 +106,43 @@ class Matcher:
         elif dep.ecosystem == "Docker" and is_official_image(dep.name):
             slug = self._names.get(_strip_hub(dep.name).removeprefix("library/"))
         return Match(slug, True) if slug else None
+
+
+ALPINE = "alpine-linux"
+CODENAME_PRODUCTS = ("debian", "ubuntu")
+_ALPINE_PART = re.compile(r"alpine(\d+(?:\.\d+)*)")
+
+
+@dataclass(frozen=True)
+class OsHit:
+    product: str
+    version: str
+    display: str
+
+
+@dataclass(frozen=True)
+class OsReading:
+    hits: list[OsHit]
+    missing: list[tuple[str, str]]  # (product slug, reason)
+
+
+def os_from_tag(tag: str, catalogue: Catalogue) -> OsReading:
+    """Read the base OS named by a Docker tag: Alpine version or Debian/Ubuntu codename."""
+    codenames: dict[str, tuple[str, str]] = {}
+    for slug in CODENAME_PRODUCTS:
+        product = catalogue.product(slug)
+        for release in product.releases if product else ():
+            if release.codename:
+                codenames.setdefault(release.codename.split()[0].lower(), (slug, release.name))
+    hits: list[OsHit] = []
+    missing: list[tuple[str, str]] = []
+    for part in (p.lower() for p in tag.split("-")):
+        alpine = _ALPINE_PART.fullmatch(part)
+        if alpine:
+            hits.append(OsHit(ALPINE, alpine.group(1), alpine.group(1)))
+        elif part == "alpine":
+            missing.append((ALPINE, "Alpine version not pinned"))
+        elif part in codenames:
+            slug, release = codenames[part]
+            hits.append(OsHit(slug, release, f"{release} ({part})"))
+    return OsReading(hits, missing)

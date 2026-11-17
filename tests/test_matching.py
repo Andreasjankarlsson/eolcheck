@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from eolchecker.matching import (
-    Match, Matcher, docker_purl, is_official_image, normalise_purl,
+    Match, Matcher, OsHit, docker_purl, is_official_image, normalise_purl, os_from_tag,
 )
 from eolchecker.models import Dependency
 
@@ -74,3 +74,21 @@ def test_matches(eco, name, expected):
 ])
 def test_no_match(eco, name):
     assert M.match(dep(eco, name)) is None
+
+
+@pytest.mark.parametrize("tag, hits", [
+    ("18-alpine3.19", [OsHit("alpine-linux", "3.19", "3.19")]),
+    ("18-bullseye", [OsHit("debian", "11", "11 (bullseye)")]),
+    ("3.12-slim-Bookworm", [OsHit("debian", "12", "12 (bookworm)")]),
+    ("17-jre-jammy", [OsHit("ubuntu", "22.04", "22.04 (jammy)")]),
+    ("bookworm-slim", [OsHit("debian", "12", "12 (bookworm)")]),
+    ("8.3-fpm", []),
+    ("latest", []),
+])
+def test_os_from_tag(tag, hits):
+    assert os_from_tag(tag, catalogue()).hits == hits
+
+
+def test_unpinned_alpine():
+    reading = os_from_tag("18-alpine", catalogue())
+    assert reading.hits == [] and reading.missing == [("alpine-linux", "Alpine version not pinned")]
