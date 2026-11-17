@@ -3,18 +3,20 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from rich.console import Console
 
-from .api import ApiUnavailable, EolClient
+from .catalogue import ApiUnavailable, Catalogue, load_catalogue
 from .detectors import Context
 from .report import render
-from .rows import build_rows
+from .rows import build_report
 from .scan import scan
 
 
-def main(argv: list[str] | None = None, client=None, detectors=None) -> int:
+def main(argv: list[str] | None = None, catalogue: Callable[[], Catalogue] | None = None,
+         detectors=None) -> int:
     parser = argparse.ArgumentParser(
         prog="eolchecker",
         description="Check whether the major frameworks in a repo are past end-of-life.",
@@ -35,17 +37,18 @@ def main(argv: list[str] | None = None, client=None, detectors=None) -> int:
 
     result = scan(root, Context(root, use_maven=not args.no_maven), detectors)
     console = Console(width=None if sys.stdout.isatty() else 200)
-    if not result.findings and not result.unrecognised:
+    if not result.findings and not result.dependencies and not result.unrecognised:
         console.print(f"No supported frameworks found in {root}")
         return 0
 
     try:
-        rows = build_rows(result.findings, client or EolClient())
+        cat = (catalogue or load_catalogue)()
     except ApiUnavailable as exc:
         print(f"Couldn't fetch end-of-life dates from endoflife.date: {exc}", file=sys.stderr)
         return 1
 
-    render(root.name, rows, result.unrecognised, console)
+    report = build_report(result, cat)
+    render(root.name, report.rows, report.unrecognised, console)
     return 0
 
 

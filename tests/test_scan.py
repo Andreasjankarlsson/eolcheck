@@ -13,7 +13,7 @@ class FakeDetector:
     def detect(self, path, ctx):
         if path.name == "bad.json":
             raise ValueError("boom")
-        return DetectResult(findings=[finding("React", "18", "18", path.relative_to(ctx.root))])
+        return DetectResult(findings=[finding("Node.js", "18", "18", path.relative_to(ctx.root))])
 
 
 def test_skips_ignored_dirs(write_files):

@@ -4,23 +4,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Component name -> endoflife.date product slug. Order is the table order.
-COMPONENTS: dict[str, str] = {
-    "Spring Boot": "spring-boot",
-    "Spring Framework": "spring-framework",
+# Runtime component name -> endoflife.date product slug.
+RUNTIMES: dict[str, str] = {
     "Java": "eclipse-temurin",
-    "Hibernate ORM": "hibernate-orm",
-    "Apache Tomcat": "tomcat",
     ".NET": "dotnet",
     ".NET Framework": "dotnetfx",
-    "Angular": "angular",
-    "AngularJS": "angularjs",
-    "React": "react",
-    "Next.js": "nextjs",
     "Node.js": "nodejs",
     "PHP": "php",
-    "Laravel": "laravel",
-    "Symfony": "symfony",
 }
 
 
@@ -65,4 +55,4 @@ class DetectResult:
 
 
 def finding(component: str, version: str, display: str, source: Path, via_maven: bool = False) -> Finding:
-    return Finding(component, COMPONENTS[component], version, display, source, via_maven)
+    return Finding(component, RUNTIMES[component], version, display, source, via_maven)

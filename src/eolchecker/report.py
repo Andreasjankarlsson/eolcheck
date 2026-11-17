@@ -12,7 +12,7 @@ STATUS_STYLE = {
     "END OF LIFE": "bold red",
     "supported": "green",
     "no EOL date": "yellow",
-    "unknown": "dim",
+    "version not found": "dim",
 }
 
 
