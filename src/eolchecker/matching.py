@@ -132,8 +132,9 @@ def os_from_tag(tag: str, catalogue: Catalogue) -> OsReading:
     for slug in CODENAME_PRODUCTS:
         product = catalogue.product(slug)
         for release in product.releases if product else ():
-            if release.codename:
-                codenames.setdefault(release.codename.split()[0].lower(), (slug, release.name))
+            words = (release.codename or "").split()
+            if words:
+                codenames.setdefault(words[0].lower(), (slug, release.name))
     hits: list[OsHit] = []
     missing: list[tuple[str, str]] = []
     for part in (p.lower() for p in tag.split("-")):

@@ -2,12 +2,13 @@ from pathlib import Path
 
 import pytest
 
+from eolchecker.catalogue import parse_catalogue
 from eolchecker.matching import (
     Match, Matcher, OsHit, docker_purl, is_official_image, normalise_purl, os_from_tag,
 )
 from eolchecker.models import Dependency
 
-from .catalogue_fixture import catalogue
+from .catalogue_fixture import catalogue, p, r
 
 
 @pytest.mark.parametrize("raw, expected", [
@@ -87,6 +88,13 @@ def test_no_match(eco, name):
 ])
 def test_os_from_tag(tag, hits):
     assert os_from_tag(tag, catalogue()).hits == hits
+
+
+def test_blank_codename_is_skipped():
+    cat = parse_catalogue({"result": [p("debian", "Debian", releases=[
+        r("13", "2025-08-09", False, None, "13.1", "  "),
+        r("12", "2023-06-10", False, "2026-06-10", "12.8", "Bookworm")])]})
+    assert os_from_tag("12-bookworm", cat).hits == [OsHit("debian", "12", "12 (bookworm)")]
 
 
 def test_unpinned_alpine():
