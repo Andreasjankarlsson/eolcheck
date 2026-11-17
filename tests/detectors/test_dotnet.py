@@ -169,6 +169,37 @@ def test_central_package_versions(write_files):
         nuget("Serilog", "3.1.1", "3.1.1", "src/Api/Api.csproj")]
 
 
+def test_central_versions_ignore_id_case(write_files):
+    root = write_files({
+        "A.csproj": '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><PackageReference Include="serilog.aspnetcore" /></ItemGroup></Project>',
+        "Directory.Packages.props": ('<Project><ItemGroup><PackageVersion Include="Serilog.AspNetCore" Version="8.0.0" />'
+                                     '</ItemGroup></Project>'),
+    })
+    assert run(root, "A.csproj").dependencies == [nuget("serilog.aspnetcore", "8.0.0", "8.0.0", "A.csproj")]
+
+
+def test_central_versions_use_own_properties(write_files):
+    root = write_files({
+        "A.csproj": '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><PackageReference Include="X" /></ItemGroup></Project>',
+        "Directory.Packages.props": ('<Project><PropertyGroup><EfVer>8.0.1</EfVer></PropertyGroup><ItemGroup>'
+                                     '<PackageVersion Include="X" Version="$(EfVer)" /></ItemGroup></Project>'),
+    })
+    assert run(root, "A.csproj").dependencies == [nuget("X", "8.0.1", "8.0.1", "A.csproj")]
+
+
+def test_version_override_wins(write_files):
+    root = write_files({
+        "A.csproj": ('<Project Sdk="Microsoft.NET.Sdk"><ItemGroup>'
+                     '<PackageReference Include="X" VersionOverride="2.0" />'
+                     '<PackageReference Include="Y"><VersionOverride>3.0</VersionOverride></PackageReference>'
+                     '</ItemGroup></Project>'),
+        "Directory.Packages.props": ('<Project><ItemGroup><PackageVersion Include="X" Version="1.0" />'
+                                     '<PackageVersion Include="Y" Version="1.0" /></ItemGroup></Project>'),
+    })
+    assert run(root, "A.csproj").dependencies == [
+        nuget("X", "2.0", "2.0", "A.csproj"), nuget("Y", "3.0", "3.0", "A.csproj")]
+
+
 def test_versionless_reference_kept_with_reason(write_files):
     root = write_files({"A.csproj": '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><PackageReference Include="Serilog" /></ItemGroup></Project>'})
     assert run(root, "A.csproj").dependencies == [

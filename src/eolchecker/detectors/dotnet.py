@@ -78,23 +78,27 @@ class DotnetDetector:
     def _package_references(self, path: Path, ctx: Context, props: dict[str, str], result: DetectResult) -> None:
         """List every PackageReference; versions may come from Directory.Packages.props."""
         source = rel(path, ctx)
-        central: dict[str, str] | None = None
+        central: tuple[dict[str, str], dict[str, str]] | None = None
         for item in ET.fromstring(path.read_bytes()).iter():
             if _local(item.tag) != "PackageReference":
                 continue
             name = item.get("Include")
             if not name:
                 continue
-            raw = item.get("Version") or _child_text(item, "Version")
+            raw = (item.get("VersionOverride") or _child_text(item, "VersionOverride")
+                   or item.get("Version") or _child_text(item, "Version"))
+            resolve_with = props
             if raw is None:
                 if central is None:
                     central = _central_versions(path.parent, ctx, result)
-                raw = central.get(name)
+                versions, central_props = central
+                raw = versions.get(name.casefold())
+                resolve_with = {**central_props, **props}
             if raw is None:
                 result.dependencies.append(Dependency(
                     "NuGet", name, None, "", source, missing=f"no version in project or {CENTRAL}"))
                 continue
-            _add_nuget(result, name, _resolve(raw, props), source)
+            _add_nuget(result, name, _resolve(raw, resolve_with), source)
 
     def _packages_config(self, path: Path, ctx: Context) -> DetectResult:
         try:
@@ -150,25 +154,27 @@ def _child_text(item, tag: str) -> str | None:
     return None
 
 
-def _central_versions(start: Path, ctx: Context, result: DetectResult) -> dict[str, str]:
-    """PackageVersion entries from the nearest Directory.Packages.props."""
+def _central_versions(start: Path, ctx: Context,
+                      result: DetectResult) -> tuple[dict[str, str], dict[str, str]]:
+    """PackageVersion entries (keyed by case-folded NuGet id) and properties from the nearest Directory.Packages.props."""
     for d in dirs_up(start, ctx.root):
         file = d / CENTRAL
         if not file.is_file():
             continue
         try:
+            properties = _properties(file)
             root = ET.fromstring(file.read_bytes())
         except ET.ParseError:
             result.unrecognised.append(Unrecognised(rel(file, ctx), f"couldn't parse {CENTRAL}"))
-            return {}
+            return {}, {}
         found: dict[str, str] = {}
         for item in root.iter():
             if _local(item.tag) == "PackageVersion" and item.get("Include"):
                 version = item.get("Version") or _child_text(item, "Version")
                 if version:
-                    found[item.get("Include")] = version
-        return found
-    return {}
+                    found[item.get("Include").casefold()] = version
+        return found, properties
+    return {}, {}
 
 
 def _props_chain(start: Path, root: Path) -> list[Path]:
