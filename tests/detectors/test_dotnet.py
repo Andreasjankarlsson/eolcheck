@@ -188,6 +188,15 @@ def test_version_property_and_range(write_files):
         nuget("Odd", None, "$(Nope)", "A.csproj", missing="'$(Nope)' isn't a version")]
 
 
+def test_update_items_are_not_references(write_files):
+    root = write_files({"A.csproj": (
+        '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup>'
+        '<PackageReference Include="X" Version="1.0" />'
+        '<PackageReference Update="X" PrivateAssets="All" />'
+        '</ItemGroup></Project>')})
+    assert run(root, "A.csproj").dependencies == [nuget("X", "1.0", "1.0", "A.csproj")]
+
+
 def test_references_listed_without_target_framework(write_files):
     root = write_files({"A.csproj": '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><PackageReference Include="Serilog" Version="3.1.1" /></ItemGroup></Project>'})
     result = run(root, "A.csproj")

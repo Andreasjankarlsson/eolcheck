@@ -82,7 +82,7 @@ class DotnetDetector:
         for item in ET.fromstring(path.read_bytes()).iter():
             if _local(item.tag) != "PackageReference":
                 continue
-            name = item.get("Include") or item.get("Update")
+            name = item.get("Include")
             if not name:
                 continue
             raw = item.get("Version") or _child_text(item, "Version")
