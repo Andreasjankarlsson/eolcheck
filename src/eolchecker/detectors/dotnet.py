@@ -6,13 +6,14 @@ import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-from ..models import DetectResult, Unrecognised, finding
-from ..versions import normalise
+from ..models import DetectResult, Dependency, Unrecognised, finding
+from ..versions import lowest, normalise
 from . import Context
 from ._util import dirs_up, parse_error, read_text, rel
 
 PROJECT_SUFFIXES = (".csproj", ".fsproj", ".vbproj")
 PROPS = "Directory.Build.props"
+CENTRAL = "Directory.Packages.props"
 NO_TARGET = "couldn't read the .NET target framework"
 _PROP_REF = re.compile(r"\$\(([^)]+)\)")
 
@@ -33,11 +34,13 @@ def parse_tfm(tfm: str) -> tuple[str, str] | None:
 
 class DotnetDetector:
     def applies_to(self, path: Path) -> bool:
-        return path.suffix in PROJECT_SUFFIXES or path.name == "global.json"
+        return path.suffix in PROJECT_SUFFIXES or path.name in ("global.json", "packages.config")
 
     def detect(self, path: Path, ctx: Context) -> DetectResult:
         if path.name == "global.json":
             return self._global_json(path, ctx)
+        if path.name == "packages.config":
+            return self._packages_config(path, ctx)
         try:
             project_props = _properties(path)
         except ET.ParseError:
@@ -52,8 +55,10 @@ class DotnetDetector:
                 result.unrecognised.append(Unrecognised(rel(props_file, ctx), f"couldn't parse {PROPS}"))
         props.update(project_props)
 
-        raw = props.get("TargetFrameworks") or props.get("TargetFramework") or props.get("TargetFrameworkVersion")
         source = rel(path, ctx)
+        self._package_references(path, ctx, props, result)
+
+        raw = props.get("TargetFrameworks") or props.get("TargetFramework") or props.get("TargetFrameworkVersion")
         if not raw:
             result.unrecognised.append(Unrecognised(source, NO_TARGET))
             return result
@@ -68,6 +73,38 @@ class DotnetDetector:
                 continue
             component, version = parsed
             result.findings.append(finding(component, version, tfm, source))
+        return result
+
+    def _package_references(self, path: Path, ctx: Context, props: dict[str, str], result: DetectResult) -> None:
+        """List every PackageReference; versions may come from Directory.Packages.props."""
+        source = rel(path, ctx)
+        central: dict[str, str] | None = None
+        for item in ET.fromstring(path.read_bytes()).iter():
+            if _local(item.tag) != "PackageReference":
+                continue
+            name = item.get("Include") or item.get("Update")
+            if not name:
+                continue
+            raw = item.get("Version") or _child_text(item, "Version")
+            if raw is None:
+                if central is None:
+                    central = _central_versions(path.parent, ctx, result)
+                raw = central.get(name)
+            if raw is None:
+                result.dependencies.append(Dependency(
+                    "NuGet", name, None, "", source, missing=f"no version in project or {CENTRAL}"))
+                continue
+            _add_nuget(result, name, _resolve(raw, props), source)
+
+    def _packages_config(self, path: Path, ctx: Context) -> DetectResult:
+        try:
+            root = ET.fromstring(path.read_bytes())
+        except ET.ParseError:
+            return parse_error(path, ctx)
+        result = DetectResult()
+        for pkg in root.iter():
+            if _local(pkg.tag) == "package" and pkg.get("id"):
+                _add_nuget(result, pkg.get("id"), pkg.get("version") or "", rel(path, ctx))
         return result
 
     def _global_json(self, path: Path, ctx: Context) -> DetectResult:
@@ -96,6 +133,42 @@ def _properties(path: Path) -> dict[str, str]:
             if child.text and child.text.strip():
                 out[_local(child.tag)] = child.text.strip()
     return out
+
+
+def _add_nuget(result: DetectResult, name: str, raw: str, source: Path) -> None:
+    version = lowest(raw)
+    if version is None:
+        result.dependencies.append(Dependency("NuGet", name, None, raw, source, missing=f"'{raw}' isn't a version"))
+    else:
+        result.dependencies.append(Dependency("NuGet", name, version, raw, source))
+
+
+def _child_text(item, tag: str) -> str | None:
+    for child in item:
+        if _local(child.tag) == tag and child.text and child.text.strip():
+            return child.text.strip()
+    return None
+
+
+def _central_versions(start: Path, ctx: Context, result: DetectResult) -> dict[str, str]:
+    """PackageVersion entries from the nearest Directory.Packages.props."""
+    for d in dirs_up(start, ctx.root):
+        file = d / CENTRAL
+        if not file.is_file():
+            continue
+        try:
+            root = ET.fromstring(file.read_bytes())
+        except ET.ParseError:
+            result.unrecognised.append(Unrecognised(rel(file, ctx), f"couldn't parse {CENTRAL}"))
+            return {}
+        found: dict[str, str] = {}
+        for item in root.iter():
+            if _local(item.tag) == "PackageVersion" and item.get("Include"):
+                version = item.get("Version") or _child_text(item, "Version")
+                if version:
+                    found[item.get("Include")] = version
+        return found
+    return {}
 
 
 def _props_chain(start: Path, root: Path) -> list[Path]:

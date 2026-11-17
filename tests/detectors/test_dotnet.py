@@ -5,7 +5,7 @@ import pytest
 
 from eolchecker.detectors import DETECTORS, Context
 from eolchecker.detectors.dotnet import DotnetDetector, parse_tfm
-from eolchecker.models import Finding, Unrecognised
+from eolchecker.models import Dependency, Finding, Unrecognised
 
 
 def run(root: Path, rel: str):
@@ -32,7 +32,7 @@ def test_parse_tfm(tfm, expected):
 
 def test_applies_to():
     d = DotnetDetector()
-    for name in ["Api.csproj", "Lib.fsproj", "Old.vbproj", "global.json"]:
+    for name in ["Api.csproj", "Lib.fsproj", "Old.vbproj", "global.json", "packages.config"]:
         assert d.applies_to(Path(name))
     assert not d.applies_to(Path("Directory.Build.props"))
 
@@ -143,6 +143,69 @@ def test_utf16_csproj(tmp_path):
     (tmp_path / "Old.csproj").write_bytes(xml.encode("utf-16"))
     [f] = run(tmp_path, "Old.csproj").findings
     assert (f.component, f.version) == (".NET Framework", "4.8")
+
+
+def nuget(name, version, display, source, **kw):
+    return Dependency("NuGet", name, version, display, Path(source), **kw)
+
+
+def test_package_reference_attribute_and_child(write_files):
+    root = write_files({"A.csproj": (
+        '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup>'
+        '<PackageReference Include="Newtonsoft.Json" Version="13.0.3" />'
+        '<PackageReference Include="Serilog"><Version>3.1.1</Version></PackageReference>'
+        '</ItemGroup></Project>')})
+    assert run(root, "A.csproj").dependencies == [
+        nuget("Newtonsoft.Json", "13.0.3", "13.0.3", "A.csproj"),
+        nuget("Serilog", "3.1.1", "3.1.1", "A.csproj")]
+
+
+def test_central_package_versions(write_files):
+    root = write_files({
+        "src/Api/Api.csproj": '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><PackageReference Include="Serilog" /></ItemGroup></Project>',
+        "Directory.Packages.props": '<Project><ItemGroup><PackageVersion Include="Serilog" Version="3.1.1" /></ItemGroup></Project>',
+    })
+    assert run(root, "src/Api/Api.csproj").dependencies == [
+        nuget("Serilog", "3.1.1", "3.1.1", "src/Api/Api.csproj")]
+
+
+def test_versionless_reference_kept_with_reason(write_files):
+    root = write_files({"A.csproj": '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><PackageReference Include="Serilog" /></ItemGroup></Project>'})
+    assert run(root, "A.csproj").dependencies == [
+        nuget("Serilog", None, "", "A.csproj", missing="no version in project or Directory.Packages.props")]
+
+
+def test_version_property_and_range(write_files):
+    root = write_files({"A.csproj": (
+        '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><SerilogVersion>3.1.1</SerilogVersion></PropertyGroup><ItemGroup>'
+        '<PackageReference Include="Serilog" Version="$(SerilogVersion)" />'
+        '<PackageReference Include="Other" Version="[2.0,3.0)" />'
+        '<PackageReference Include="Odd" Version="$(Nope)" />'
+        '</ItemGroup></Project>')})
+    assert run(root, "A.csproj").dependencies == [
+        nuget("Serilog", "3.1.1", "3.1.1", "A.csproj"),
+        nuget("Other", "2.0", "[2.0,3.0)", "A.csproj"),
+        nuget("Odd", None, "$(Nope)", "A.csproj", missing="'$(Nope)' isn't a version")]
+
+
+def test_references_listed_without_target_framework(write_files):
+    root = write_files({"A.csproj": '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><PackageReference Include="Serilog" Version="3.1.1" /></ItemGroup></Project>'})
+    result = run(root, "A.csproj")
+    assert result.unrecognised == [Unrecognised(Path("A.csproj"), "couldn't read the .NET target framework")]
+    assert [d.name for d in result.dependencies] == ["Serilog"]
+
+
+def test_packages_config(write_files):
+    root = write_files({"web/packages.config": '<packages><package id="jQuery" version="3.7.1" targetFramework="net48" /></packages>'})
+    result = run(root, "web/packages.config")
+    assert result.dependencies == [nuget("jQuery", "3.7.1", "3.7.1", "web/packages.config")]
+    assert (result.findings, result.unrecognised) == ([], [])
+
+
+def test_broken_packages_config(write_files):
+    root = write_files({"packages.config": "<packages>"})
+    assert run(root, "packages.config").unrecognised == [
+        Unrecognised(Path("packages.config"), "couldn't parse packages.config")]
 
 
 def test_registered():
