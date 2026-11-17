@@ -171,13 +171,15 @@ def build_report(result: DetectResult, catalogue: Catalogue) -> Report:
             eos, status = "", ""
             if m.version:
                 release, own_eos, own_status = _status(m.version, product)
-                if not m.by_rule or (release is not None and release == chosen_release):
+                # A Docker image matched by name is that product itself, so its own version always counts.
+                if not m.by_rule or m.sbom[0] == "Docker" or (release is not None and release == chosen_release):
                     eos, status = own_eos or "", own_status
             sbom.append(SbomRow(m.sbom[0], m.sbom[1], m.display, str(source), product.label, eos, status))
 
     seen: dict[tuple[str, ...], SbomRow] = {}
     for s in sbom:
-        key = (s.ecosystem, s.name, s.found_in) + ((s.version,) if s.ecosystem == "Runtime" else ())
+        # Runtimes and Docker images can repeat in one file with different versions (e.g. multi-stage builds).
+        key = (s.ecosystem, s.name, s.found_in) + ((s.version,) if s.ecosystem in ("Runtime", "Docker") else ())
         seen.setdefault(key, s)
     rows.sort(key=lambda r: (r.found_in, r.component))
     return Report(

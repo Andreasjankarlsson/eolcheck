@@ -168,6 +168,19 @@ def test_unknown_image_still_gets_os_row():
     assert (image.product, image.end_of_support, image.status) == ("", "", "")
 
 
+def test_multi_stage_dockerfile_keeps_every_sbom_row():
+    rep = report(dependencies=[docker("node", "18-bullseye", "18"), docker("python", "3.12-slim-bookworm", "3.12"),
+                               docker("debian", "12-bookworm", "12"), docker("node", "22-alpine", "22")])
+    assert sorted((s.name, s.version, s.status) for s in rep.sbom) == [
+        ("Debian", "11 (bullseye)", "END OF LIFE"),
+        ("Debian", "12 (bookworm)", "supported"),
+        ("debian", "12-bookworm", "supported"),
+        ("node", "18-bullseye", "END OF LIFE"),
+        ("node", "22-alpine", "supported"),
+        ("python", "3.12-slim-bookworm", ""),
+    ]
+
+
 def test_unpinned_alpine_is_unrecognised():
     rep = report(dependencies=[docker("node", "18-alpine", "18")])
     assert [r.component for r in rep.rows] == ["Node.js"]
@@ -212,7 +225,13 @@ def test_runtime_sbom_rows():
 def test_sbom_dedupes_on_ecosystem_name_source():
     sbom = report(dependencies=[Dependency("npm", "react", "17.0.2", "17.0.2", PKG),
                                 Dependency("npm", "react", "17.0.2", "17.0.2", PKG)]).sbom
-    assert len(sbom) == 1
+    assert sbom == [SbomRow("npm", "react", "17.0.2", "package.json", "React", "", "no EOL date")]
+
+
+def test_sbom_merges_identical_os_readings():
+    sbom = report(dependencies=[docker("node", "18-bullseye", "18"), docker("ruby", "3.3-bullseye", "3.3")]).sbom
+    assert [s for s in sbom if s.name == "Debian"] == [
+        SbomRow("Docker", "Debian", "11 (bullseye)", "Dockerfile", "Debian", "2024-08-14", "END OF LIFE")]
 
 
 def test_sorting():
