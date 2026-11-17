@@ -61,6 +61,8 @@ def read_pom(pom_xml: str | bytes, source: Path, parent_props: dict[str, str], *
     if parent_version:
         props["project.parent.version"] = parent_version
     props["project.version"] = _text(root, "version") or parent_version or ""
+    props["project.groupId"] = _text(root, "groupId") or (_text(parent, "groupId") if parent is not None else None) or ""
+    props["project.artifactId"] = _text(root, "artifactId") or ""
 
     result = DetectResult(dependencies=_dependencies(root, props, source))
     gaps: list[tuple[str, Unrecognised]] = []

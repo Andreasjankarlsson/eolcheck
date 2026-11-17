@@ -140,6 +140,17 @@ def test_coordinates_resolve_properties(write_files):
     assert run(root).dependencies == [Dependency("Maven", "com.acme:lib", "1.2", "1.2", Path("pom.xml"))]
 
 
+def test_project_coordinates_resolve(write_files):
+    body = ("<parent><groupId>com.acme</groupId><artifactId>shop</artifactId><version>1.4</version></parent>"
+            "<artifactId>app</artifactId><properties><java.version>17</java.version></properties><dependencies>"
+            + dep("${project.groupId}", "core", "${project.version}")
+            + dep("com.acme", "${project.artifactId}-api", "2.0") + "</dependencies>")
+    root = write_files({"pom.xml": pom(body)})
+    deps = [(d.name, d.version) for d in run(root).dependencies]
+    assert ("com.acme:core", "1.4") in deps
+    assert ("com.acme:app-api", "2.0") in deps
+
+
 def test_child_inherits_from_in_repo_parent(write_files):
     root_pom = pom(BOOT_PARENT + "<groupId>com.acme</groupId><artifactId>shop</artifactId><version>1.0</version>"
                    "<packaging>pom</packaging><properties><java.version>21</java.version></properties>")
