@@ -19,7 +19,10 @@ eolchecker ~/code/some-repo --sbom out.md   # also write every dependency to out
 
 It needs internet access to fetch the dates. The full endoflife.date catalogue
 is cached in `~/Library/Caches/eolchecker/products-full.json` (on Linux
-`~/.cache/eolchecker/`) and refreshed after 24 hours.
+`$XDG_CACHE_HOME/eolchecker/`, or `~/.cache/eolchecker/` when that isn't set)
+and refreshed after 24 hours. If endoflife.date can't be reached, a cached copy
+of any age is used and a warning says how old it is; with no cached copy the
+run stops with an error.
 
 For each product it finds, it shows the version in use, the file it came
 from, the end-of-support date, the newest release, and a status:
@@ -38,8 +41,8 @@ tags that pin an OS (e.g. `bullseye`) add an OS row such as Debian 11.
 
 It reads `pom.xml`, `package.json` (plus lock files), `.nvmrc`,
 `.node-version`, `composer.json`/`composer.lock`, `*.csproj`/`*.fsproj`/`*.vbproj`
-(`PackageReference`), `Directory.Build.props`, `Directory.Packages.props`,
-`packages.config`, `global.json`, Dockerfiles and compose files. It does not
+(`PackageReference`, with `Directory.Build.props` and `Directory.Packages.props`
+read alongside), `packages.config`, `global.json`, Dockerfiles and compose files. It does not
 read Gradle files or CI configs. Only declared dependencies are checked, not
 transitive ones. If a Maven dependency is declared without a version, the
 tool asks Maven for it.
