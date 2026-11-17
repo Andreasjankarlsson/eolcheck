@@ -134,14 +134,18 @@ def build_report(result: DetectResult, catalogue: Catalogue) -> Report:
         if dep.ecosystem == "Docker" and dep.tag:
             reading = os_from_tag(dep.tag, catalogue)
             for hit in reading.hits:
-                if match and hit.product == match.product and version is None:
-                    version, display = hit.version, hit.display
+                os_product = catalogue.product(hit.product)
+                if os_product is None:
                     continue
-                label = catalogue.product(hit.product).label
+                if match and hit.product == match.product:
+                    if version is None:  # the image is the OS itself: one row, from the codename
+                        version, display = hit.version, hit.display
+                    continue
                 groups.setdefault((hit.product, dep.source), []).append(
-                    _Member(hit.version, hit.display, False, sbom=("Docker", label)))
+                    _Member(hit.version, hit.display, False, sbom=("Docker", os_product.label)))
             for slug, reason in reading.missing:
-                groups.setdefault((slug, dep.source), []).append(_Member(None, "", False, missing=reason))
+                if catalogue.product(slug) is not None:
+                    groups.setdefault((slug, dep.source), []).append(_Member(None, "", False, missing=reason))
         if match is None:
             sbom.append(SbomRow(dep.ecosystem, dep.name, display, str(dep.source), "", "", ""))
             continue

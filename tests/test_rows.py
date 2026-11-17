@@ -4,6 +4,7 @@ from eolchecker.catalogue import parse_catalogue
 from eolchecker.models import DetectResult, Dependency, Unrecognised, finding
 from eolchecker.rows import Row, SbomRow, _tidy, build_report
 
+from . import catalogue_fixture
 from .catalogue_fixture import catalogue, p, r
 
 POM = Path("pom.xml")
@@ -140,7 +141,24 @@ def test_os_image_single_row():
     rep = report(dependencies=[docker("debian", "bookworm-slim", None, missing="image tag doesn't pin a version")])
     assert [(r.component, r.version, r.status) for r in rep.rows] == [("Debian", "12 (bookworm)", "supported")]
     assert rep.unrecognised == []
-    assert len(rep.sbom) == 1
+    assert rep.sbom == [
+        SbomRow("Docker", "debian", "12 (bookworm)", "Dockerfile", "Debian", "2026-06-10", "supported")]
+
+
+def test_os_image_with_numeric_tag_single_sbom_row():
+    rep = report(dependencies=[docker("debian", "12-bookworm", "12")])
+    assert [(r.component, r.version) for r in rep.rows] == [("Debian", "12-bookworm")]
+    assert rep.sbom == [
+        SbomRow("Docker", "debian", "12-bookworm", "Dockerfile", "Debian", "2026-06-10", "supported")]
+
+
+def test_os_product_missing_from_catalogue_is_skipped():
+    cat = parse_catalogue({"result": [p for p in catalogue_fixture.FULL["result"] if p["name"] != "alpine-linux"]})
+    for tag in ("18-alpine", "18-alpine3.19"):
+        rep = report(dependencies=[docker("node", tag, "18")], cat=cat)
+        assert [r.component for r in rep.rows] == ["Node.js"]
+        assert rep.unrecognised == []
+        assert [s.name for s in rep.sbom] == ["node"]
 
 
 def test_unknown_image_still_gets_os_row():
