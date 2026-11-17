@@ -15,7 +15,8 @@ def run(root: Path, rel: str = "Dockerfile"):
     ("Dockerfile", True), ("Dockerfile.prod", True), ("api.Dockerfile", True),
     ("web.dockerfile", True), ("docker-compose.yml", True), ("docker-compose.override.yaml", True),
     ("compose.yaml", True), ("compose.dev.yml", True), ("Dockerfile.md", True),
-    ("README.md", False), ("composer.json", False)])
+    ("docker-compose-prod.yml", True), ("compose-dev.yaml", True),
+    ("README.md", False), ("composer.json", False), ("composer.lock", False)])
 def test_applies_to(name, ok):
     assert DockerDetector().applies_to(Path("x") / name) is ok
 
@@ -86,10 +87,16 @@ def test_compose_images(write_files):
     assert [(d.name, d.version) for d in deps] == [("postgres", "16"), ("ghcr.io/acme/web", "1.4")]
 
 
+def test_compose_dashed_filename_is_read(write_files):
+    root = write_files({"docker-compose-prod.yml": "services:\n  db:\n    image: postgres:16\n"})
+    deps = run(root, "docker-compose-prod.yml").dependencies
+    assert [(d.name, d.version) for d in deps] == [("postgres", "16")]
+
+
 def test_compose_variable_without_default(write_files):
     root = write_files({"compose.yaml": "services:\n  a:\n    image: \"node:${TAG}\"\n"})
     [dep] = run(root, "compose.yaml").dependencies
-    assert dep.missing == "image tag set by a build variable"
+    assert dep.missing == "image tag set by a variable"
 
 
 def test_variable_in_image_name_is_unrecognised(write_files):

@@ -11,13 +11,14 @@ from ..versions import normalise
 from . import Context
 from ._util import parse_error, read_text, rel
 
-_COMPOSE = re.compile(r"^(docker-)?compose(\..+)?\.ya?ml$")
+_COMPOSE = re.compile(r"^(docker-)?compose.*\.ya?ml$")
 _VAR = re.compile(r"\$\{(\w+)(?:(:?-)([^}]*))?\}|\$(\w+)")
 _LEADING_VERSION = re.compile(r"[vV]?(\d+(?:\.\d+)*)")
 
 NO_PIN = "image tag doesn't pin a version"
 DIGEST_ONLY = "image pinned by digest only"
 BUILD_VARIABLE = "image tag set by a build variable"
+COMPOSE_VARIABLE = "image tag set by a variable"
 
 
 class DockerDetector:
@@ -56,7 +57,7 @@ def _substitute(text: str, variables: dict[str, str]) -> str:
     return _VAR.sub(repl, text)
 
 
-def _dependency(ref: str, source: Path) -> Dependency | None:
+def _dependency(ref: str, source: Path, variable_reason: str = BUILD_VARIABLE) -> Dependency | None:
     """None when the image name still contains a variable."""
     name, tag, digest = split_image(ref)
     if not name or "$" in name:
@@ -67,7 +68,7 @@ def _dependency(ref: str, source: Path) -> Dependency | None:
     missing = None
     if version is None:
         if tag and "$" in tag:
-            missing = BUILD_VARIABLE
+            missing = variable_reason
         elif tag is None and digest:
             missing = DIGEST_ONLY
         else:
@@ -147,7 +148,7 @@ def _detect_compose(path: Path, ctx: Context) -> DetectResult:
         image = service.get("image") if isinstance(service, dict) else None
         if not isinstance(image, str):
             continue
-        dep = _dependency(_substitute(image.strip(), {}), source)
+        dep = _dependency(_substitute(image.strip(), {}), source, COMPOSE_VARIABLE)
         if dep is None:
             result.unrecognised.append(Unrecognised(source, f"couldn't read the image name in image: {image}"))
         else:
