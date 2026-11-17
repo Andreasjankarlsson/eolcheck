@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 
 from eolchecker.detectors import DETECTORS, Context
-from eolchecker.detectors.maven import MavenDetector, java_version, read_pom
-from eolchecker.models import Finding, Unrecognised
+from eolchecker.detectors.maven import INHERITABLE, MavenDetector, java_version, read_pom
+from eolchecker.models import Dependency, Finding, Unrecognised
 
 NS = 'xmlns="http://maven.apache.org/POM/4.0.0"'
 
@@ -15,6 +15,7 @@ def pom(body: str, ns: bool = True) -> str:
 
 BOOT_PARENT = ("<parent><groupId>org.springframework.boot</groupId>"
                "<artifactId>spring-boot-starter-parent</artifactId><version>3.1.5</version></parent>")
+BOOT_PARENT_NAME = "org.springframework.boot:spring-boot-starter-parent"
 
 
 def dep(group, artifact, version=None, extra=""):
@@ -24,6 +25,10 @@ def dep(group, artifact, version=None, extra=""):
 
 def run(root: Path, rel: str = "pom.xml", use_maven: bool = False):
     return MavenDetector().detect(root / rel, Context(root, use_maven=use_maven))
+
+
+def names(result):
+    return [d.name for d in result.dependencies]
 
 
 @pytest.mark.parametrize("raw,expected", [("1.8", "8"), ("17", "17"), ("21.0.1", "21"), ("${x}", None)])
@@ -36,17 +41,24 @@ def test_applies_to():
     assert not MavenDetector().applies_to(Path("a/build.xml"))
 
 
+def test_only_java_is_inherited():
+    assert INHERITABLE == ("Java",)
+
+
 def test_spring_boot_parent(write_files):
     root = write_files({"backend/pom.xml": pom(BOOT_PARENT + "<properties><java.version>17</java.version></properties>")})
-    assert run(root, "backend/pom.xml").findings == [
-        Finding("Spring Boot", "spring-boot", "3.1.5", "3.1.5", Path("backend/pom.xml")),
-        Finding("Java", "eclipse-temurin", "17", "17", Path("backend/pom.xml")),
-    ]
+    result = run(root, "backend/pom.xml")
+    src = Path("backend/pom.xml")
+    assert Dependency("Maven", BOOT_PARENT_NAME, "3.1.5", "3.1.5", src) in result.dependencies
+    assert result.findings == [Finding("Java", "eclipse-temurin", "17", "17", src)]
+    assert result.unrecognised == []
 
 
 def test_no_namespace_pom(write_files):
     root = write_files({"pom.xml": pom(BOOT_PARENT + "<properties><java.version>17</java.version></properties>", ns=False)})
-    assert [f.component for f in run(root).findings] == ["Spring Boot", "Java"]
+    result = run(root)
+    assert names(result) == [BOOT_PARENT_NAME]
+    assert [f.component for f in result.findings] == ["Java"]
 
 
 def test_boot_bom_import_with_property(write_files):
@@ -57,8 +69,10 @@ def test_boot_bom_import_with_property(write_files):
                   "<type>pom</type><scope>import</scope>")
             + "</dependencies></dependencyManagement>")
     root = write_files({"pom.xml": pom(body)})
-    found = {f.component: f.version for f in run(root).findings}
-    assert found == {"Spring Boot": "3.2.4", "Java": "21"}
+    result = run(root)
+    assert result.dependencies == [Dependency(
+        "Maven", "org.springframework.boot:spring-boot-dependencies", "3.2.4", "3.2.4", Path("pom.xml"))]
+    assert {f.component: f.version for f in result.findings} == {"Java": "21"}
 
 
 def test_java_from_compiler_plugin(write_files):
@@ -69,77 +83,61 @@ def test_java_from_compiler_plugin(write_files):
     assert run(root).findings == [Finding("Java", "eclipse-temurin", "8", "1.8", Path("pom.xml"))]
 
 
+def test_plugins_not_listed(write_files):
+    body = ("<properties><java.version>17</java.version></properties>"
+            "<build><plugins><plugin><groupId>org.apache.maven.plugins</groupId>"
+            "<artifactId>maven-compiler-plugin</artifactId><version>3.11.0</version></plugin></plugins>"
+            "<pluginManagement><plugins><plugin><groupId>org.apache.maven.plugins</groupId>"
+            "<artifactId>maven-surefire-plugin</artifactId><version>3.2.5</version></plugin></plugins>"
+            "</pluginManagement></build>")
+    root = write_files({"pom.xml": pom(body)})
+    assert run(root).dependencies == []
+
+
 def test_explicit_libs(write_files):
     body = ("<properties><java.version>17</java.version></properties><dependencies>"
-            + dep("org.hibernate.orm", "hibernate-core", "6.4.1.Final")
+            + dep("org.hibernate.orm", "hibernate-core", "6.5.2.Final")
             + dep("org.apache.tomcat.embed", "tomcat-embed-core", "10.1.19")
             + dep("org.springframework", "spring-core", "6.1.5")
             + "</dependencies>")
     root = write_files({"pom.xml": pom(body)})
-    found = {f.component: (f.version, f.display) for f in run(root).findings}
-    assert found == {
-        "Spring Framework": ("6.1.5", "6.1.5"),
-        "Java": ("17", "17"),
-        "Hibernate ORM": ("6.4.1", "6.4.1.Final"),
-        "Apache Tomcat": ("10.1.19", "10.1.19"),
-    }
+    result = run(root)
+    src = Path("pom.xml")
+    assert result.dependencies == [
+        Dependency("Maven", "org.hibernate.orm:hibernate-core", "6.5.2", "6.5.2.Final", src),
+        Dependency("Maven", "org.apache.tomcat.embed:tomcat-embed-core", "10.1.19", "10.1.19", src),
+        Dependency("Maven", "org.springframework:spring-core", "6.1.5", "6.1.5", src),
+    ]
+    assert [f.component for f in result.findings] == ["Java"]
 
 
-def test_tomcat_version_property(write_files):
-    body = BOOT_PARENT + "<properties><java.version>17</java.version><tomcat.version>10.1.30</tomcat.version></properties>"
-    root = write_files({"pom.xml": pom(body)})
-    assert "Apache Tomcat" in {f.component for f in run(root).findings}
-
-
-def test_spring_framework_bom(write_files):
-    body = ("<properties><java.version>17</java.version></properties><dependencyManagement><dependencies>"
-            + dep("org.springframework", "spring-framework-bom", "5.3.39", "<type>pom</type><scope>import</scope>")
-            + "</dependencies></dependencyManagement>")
-    root = write_files({"pom.xml": pom(body)})
-    assert ("Spring Framework", "5.3.39") in {(f.component, f.version) for f in run(root).findings}
-
-
-def test_starter_alone_does_not_report_framework_libs(write_files):
+def test_versionless_dependency_kept_with_reason(write_files):
     body = BOOT_PARENT + "<properties><java.version>17</java.version></properties><dependencies>" + \
         dep("org.springframework.boot", "spring-boot-starter-web") + "</dependencies>"
     root = write_files({"pom.xml": pom(body)})
     result = run(root)
-    assert [f.component for f in result.findings] == ["Spring Boot", "Java"]
+    src = Path("pom.xml")
+    assert Dependency("Maven", "org.springframework.boot:spring-boot-starter-web", None, "set by parent pom", src,
+                      missing="set by parent pom") in result.dependencies
     assert result.unrecognised == []
 
 
-@pytest.mark.parametrize("group,artifact,component", [
-    ("org.springframework", "spring-context", "Spring Framework"),
-    ("org.hibernate.orm", "hibernate-core", "Hibernate ORM"),
-    ("org.apache.tomcat.embed", "tomcat-embed-core", "Apache Tomcat"),
-])
-def test_versionless_declaration_is_a_gap(write_files, group, artifact, component):
-    body = BOOT_PARENT + "<properties><java.version>17</java.version></properties><dependencies>" + \
-        dep(group, artifact) + "</dependencies>"
+def test_own_dependency_management_sets_version(write_files):
+    body = ("<properties><java.version>17</java.version></properties><dependencies>"
+            + dep("org.hibernate.orm", "hibernate-core") + "</dependencies>"
+            "<dependencyManagement><dependencies>" + dep("org.hibernate.orm", "hibernate-core", "6.4.1.Final")
+            + "</dependencies></dependencyManagement>")
     reading = read_pom(pom(body), Path("pom.xml"), {}, check_java=True)
-    assert [f.component for f in reading.result.findings] == ["Spring Boot", "Java"]
-    assert reading.gap_components == {component}
-    assert reading.result.unrecognised == [Unrecognised(Path("pom.xml"), f"{component} version is set by Spring Boot")]
+    assert reading.result.dependencies == [
+        Dependency("Maven", "org.hibernate.orm:hibernate-core", "6.4.1", "6.4.1.Final", Path("pom.xml"))]
+    assert not reading.has_gaps
 
 
-def test_versionless_declaration_with_company_parent(write_files):
-    body = ("<parent><groupId>com.acme</groupId><artifactId>acme-parent</artifactId><version>5</version></parent>"
-            "<properties><java.version>17</java.version></properties><dependencies>"
-            + dep("org.hibernate.orm", "hibernate-core") + "</dependencies>")
-    reading = read_pom(pom(body), Path("pom.xml"), {}, check_java=True)
-    assert reading.result.unrecognised == [
-        Unrecognised(Path("pom.xml"), "Hibernate ORM version is set by a parent pom or BOM")]
-
-
-def test_versionless_declaration_reported_once_at_in_repo_parent(write_files):
-    root_pom = pom(BOOT_PARENT + "<groupId>com.acme</groupId><artifactId>shop</artifactId><version>1.0</version>"
-                   "<packaging>pom</packaging><properties><java.version>21</java.version></properties>"
-                   "<dependencies>" + dep("org.hibernate.orm", "hibernate-core") + "</dependencies>")
-    child = pom("<parent><groupId>com.acme</groupId><artifactId>shop</artifactId><version>1.0</version></parent>"
-                "<artifactId>app</artifactId>")
-    root = write_files({"pom.xml": root_pom, "app/pom.xml": child})
-    assert run(root, "app/pom.xml").unrecognised == []
-    assert [u.reason for u in run(root).unrecognised] == ["Hibernate ORM version is set by Spring Boot"]
+def test_coordinates_resolve_properties(write_files):
+    body = ("<properties><java.version>17</java.version><g>com.acme</g><a>lib</a></properties><dependencies>"
+            + dep("${g}", "${a}", "1.2") + dep("${nope}", "other", "1.0") + "</dependencies>")
+    root = write_files({"pom.xml": pom(body)})
+    assert run(root).dependencies == [Dependency("Maven", "com.acme:lib", "1.2", "1.2", Path("pom.xml"))]
 
 
 def test_child_inherits_from_in_repo_parent(write_files):
@@ -150,9 +148,10 @@ def test_child_inherits_from_in_repo_parent(write_files):
                 + dep("org.springframework.boot", "spring-boot-starter-web") + "</dependencies>")
     root = write_files({"pom.xml": root_pom, "app/pom.xml": child})
     result = run(root, "app/pom.xml")
-    # Covered by the parent's rows: no duplicate rows, and no gaps.
+    # Java is covered by the parent's row: no duplicate row, and no gap.
     assert (result.findings, result.unrecognised) == ([], [])
-    assert [(f.component, f.version) for f in run(root).findings] == [("Spring Boot", "3.1.5"), ("Java", "21")]
+    assert names(result) == ["com.acme:shop", "org.springframework.boot:spring-boot-starter-web"]
+    assert [(f.component, f.version) for f in run(root).findings] == [("Java", "21")]
 
 
 def test_child_property_from_parent(write_files):
@@ -164,27 +163,21 @@ def test_child_property_from_parent(write_files):
                 + dep("org.hibernate", "hibernate-core", "${hibernate.version}") + "</dependencies>")
     root = write_files({"pom.xml": root_pom, "app/pom.xml": child})
     result = run(root, "app/pom.xml")
-    assert [(f.component, f.version) for f in result.findings] == [("Hibernate ORM", "6.2.0")]
+    assert Dependency("Maven", "org.hibernate:hibernate-core", "6.2.0", "6.2.0.Final",
+                      Path("app/pom.xml")) in result.dependencies
+    assert result.findings == []
     assert result.unrecognised == []
-
-
-def test_company_parent_gap(write_files):
-    body = ("<parent><groupId>com.acme</groupId><artifactId>acme-parent</artifactId><version>5</version></parent>"
-            "<dependencies>" + dep("org.springframework.boot", "spring-boot-starter-web") + "</dependencies>")
-    reading = read_pom(pom(body), Path("pom.xml"), {}, check_java=True)
-    assert reading.has_gaps
-    assert reading.gap_components == {"Spring Boot", "Java"}
-    assert reading.result.unrecognised == [
-        Unrecognised(Path("pom.xml"), "couldn't read the Spring Boot version"),
-        Unrecognised(Path("pom.xml"), "couldn't read the Java version"),
-    ]
 
 
 def test_unresolved_property_gap(write_files):
     body = ("<properties><java.version>17</java.version></properties><dependencies>"
             + dep("org.hibernate.orm", "hibernate-core", "${hibernate.version}") + "</dependencies>")
     root = write_files({"pom.xml": pom(body)})
-    assert run(root).unrecognised == [Unrecognised(Path("pom.xml"), "couldn't resolve ${hibernate.version}")]
+    result = run(root)
+    assert result.dependencies == [Dependency(
+        "Maven", "org.hibernate.orm:hibernate-core", None, "${hibernate.version}", Path("pom.xml"),
+        missing="couldn't resolve ${hibernate.version}")]
+    assert result.unrecognised == []
 
 
 def test_aggregator_pom_no_java_gap(write_files):
@@ -197,7 +190,9 @@ def test_latin1_pom(tmp_path):
     xml = ('<?xml version="1.0" encoding="ISO-8859-1"?><project><name>José</name>' + BOOT_PARENT
            + "<properties><java.version>11</java.version></properties></project>")
     (tmp_path / "pom.xml").write_bytes(xml.encode("iso-8859-1"))
-    assert [(f.component, f.version) for f in run(tmp_path).findings] == [("Spring Boot", "3.1.5"), ("Java", "11")]
+    result = run(tmp_path)
+    assert names(result) == [BOOT_PARENT_NAME]
+    assert [(f.component, f.version) for f in result.findings] == [("Java", "11")]
 
 
 def test_broken_xml_unrecognised(write_files):

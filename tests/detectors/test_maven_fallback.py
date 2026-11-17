@@ -5,7 +5,9 @@ from pathlib import Path
 from eolchecker.detectors import Context
 from eolchecker.detectors import maven_fallback
 from eolchecker.detectors.maven import MavenDetector
-from eolchecker.models import Finding, Unrecognised
+from eolchecker.models import Dependency, Finding, Unrecognised
+
+STARTER = "org.springframework.boot:spring-boot-starter-web"
 
 COMPANY_POM = """<project xmlns="http://maven.apache.org/POM/4.0.0">
   <parent><groupId>com.acme</groupId><artifactId>acme-parent</artifactId><version>5</version></parent>
@@ -57,9 +59,12 @@ def test_fallback_fills_gaps(write_files, monkeypatch):
     with_mvn(monkeypatch)
     root = write_files({"api/pom.xml": COMPANY_POM})
     result = detect(root, FakeRunner())
-    assert result.findings == [
-        Finding("Spring Boot", "spring-boot", "3.3.2", "3.3.2", Path("api/pom.xml"), via_maven=True),
-        Finding("Java", "eclipse-temurin", "17", "17", Path("api/pom.xml"), via_maven=True),
+    src = Path("api/pom.xml")
+    assert result.findings == [Finding("Java", "eclipse-temurin", "17", "17", src, via_maven=True)]
+    # Only what the file declares: the inherited hibernate-core from the effective pom is not added.
+    assert result.dependencies == [
+        Dependency("Maven", "com.acme:acme-parent", "5", "5", src),
+        Dependency("Maven", STARTER, "3.3.2", "3.3.2", src, via_maven=True),
     ]
     assert result.unrecognised == []
 
@@ -77,15 +82,22 @@ def test_no_maven_flag_skips(write_files, monkeypatch):
     runner = FakeRunner()
     result = detect(root, runner, use_maven=False)
     assert runner.calls == []
-    assert len(result.unrecognised) == 2
+    assert result.unrecognised == [Unrecognised(Path("api/pom.xml"), "couldn't read the Java version")]
+    assert starter(result).missing == "set by parent pom"
+
+
+def starter(result):
+    return next(d for d in result.dependencies if d.name == STARTER)
 
 
 def test_fallback_failure_keeps_gap(write_files, monkeypatch):
     with_mvn(monkeypatch)
     root = write_files({"api/pom.xml": COMPANY_POM})
     result = detect(root, FakeRunner(returncode=1))
-    assert Unrecognised(Path("api/pom.xml"), "couldn't read the Spring Boot version (Maven fallback failed)") \
-        in result.unrecognised
+    assert result.unrecognised == [
+        Unrecognised(Path("api/pom.xml"), "couldn't read the Java version (Maven fallback failed)")]
+    assert starter(result) == Dependency("Maven", STARTER, None, "set by parent pom", Path("api/pom.xml"),
+                                         missing="set by parent pom, Maven fallback failed")
 
 
 def test_maven_not_found(write_files, monkeypatch):
@@ -94,7 +106,8 @@ def test_maven_not_found(write_files, monkeypatch):
     runner = FakeRunner()
     result = detect(root, runner)
     assert runner.calls == []
-    assert Unrecognised(Path("api/pom.xml"), "couldn't read the Java version (Maven not found)") in result.unrecognised
+    assert result.unrecognised == [Unrecognised(Path("api/pom.xml"), "couldn't read the Java version (Maven not found)")]
+    assert starter(result).missing == "set by parent pom, Maven not found"
 
 
 def test_prefers_mvnw(write_files, monkeypatch):
@@ -114,7 +127,8 @@ def test_no_gaps_no_run(write_files, monkeypatch):
     runner = FakeRunner()
     result = detect(root, runner)
     assert runner.calls == []
-    assert [f.component for f in result.findings] == ["Spring Boot", "Java"]
+    assert [f.component for f in result.findings] == ["Java"]
+    assert [d.version for d in result.dependencies] == ["3.3.2"]
 
 
 def test_runner_exception_is_failure(write_files, monkeypatch):
@@ -125,7 +139,8 @@ def test_runner_exception_is_failure(write_files, monkeypatch):
         raise subprocess.TimeoutExpired(cmd, 180)
 
     result = detect(root, boom)
-    assert all(u.reason.endswith("(Maven fallback failed)") for u in result.unrecognised)
+    assert result.unrecognised and all(u.reason.endswith("(Maven fallback failed)") for u in result.unrecognised)
+    assert starter(result).missing == "set by parent pom, Maven fallback failed"
 
 
 BOOT_POM_VERSIONLESS_HIBERNATE = """<project xmlns="http://maven.apache.org/POM/4.0.0">
@@ -141,11 +156,14 @@ BOOT_POM_VERSIONLESS_HIBERNATE = """<project xmlns="http://maven.apache.org/POM/
 def test_fallback_fills_versionless_declaration(write_files, monkeypatch):
     with_mvn(monkeypatch)
     root = write_files({"api/pom.xml": BOOT_POM_VERSIONLESS_HIBERNATE})
-    result = detect(root, FakeRunner())
-    assert result.findings == [
-        Finding("Spring Boot", "spring-boot", "3.3.2", "3.3.2", Path("api/pom.xml")),
-        Finding("Java", "eclipse-temurin", "17", "17", Path("api/pom.xml")),
-        Finding("Hibernate ORM", "hibernate-orm", "6.5.2", "6.5.2.Final", Path("api/pom.xml"), via_maven=True),
+    runner = FakeRunner()
+    result = detect(root, runner)
+    src = Path("api/pom.xml")
+    assert len(runner.calls) == 1
+    assert result.findings == [Finding("Java", "eclipse-temurin", "17", "17", src)]
+    assert result.dependencies == [
+        Dependency("Maven", "org.springframework.boot:spring-boot-starter-parent", "3.3.2", "3.3.2", src),
+        Dependency("Maven", "org.hibernate.orm:hibernate-core", "6.5.2", "6.5.2.Final", src, via_maven=True),
     ]
     assert result.unrecognised == []
 
@@ -154,5 +172,6 @@ def test_versionless_declaration_without_maven(write_files, monkeypatch):
     monkeypatch.setattr(maven_fallback.shutil, "which", lambda name: None)
     root = write_files({"api/pom.xml": BOOT_POM_VERSIONLESS_HIBERNATE})
     result = detect(root, FakeRunner())
-    assert result.unrecognised == [
-        Unrecognised(Path("api/pom.xml"), "Hibernate ORM version is set by Spring Boot (Maven not found)")]
+    assert result.unrecognised == []
+    hib = next(d for d in result.dependencies if d.name == "org.hibernate.orm:hibernate-core")
+    assert hib.missing == "set by parent pom, Maven not found"
