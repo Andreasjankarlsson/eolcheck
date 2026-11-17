@@ -28,6 +28,8 @@ def render(repo_name: str, rows: list[Row], unrecognised: list[Unrecognised], co
             table.add_row(r.component, r.version, r.found_in, r.end_of_support, r.latest,
                           f"[{style}]{escape(r.status)}[/{style}]" if style else escape(r.status))
         console.print(table)
+    else:
+        console.print("No dependencies tracked by endoflife.date found.")
     if unrecognised:
         console.print()
         console.print("Not recognised:")
