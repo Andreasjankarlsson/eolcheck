@@ -1,0 +1,19 @@
+{
+  "_readme": ["Hand-written minimal lock file for tests."],
+  "content-hash": "0000000000000000000000000000000000",
+  "packages": [
+    { "name": "laravel/framework", "version": "v10.48.4", "type": "library" },
+    { "name": "psr/log", "version": "3.0.0", "type": "library" }
+  ],
+  "packages-dev": [
+    { "name": "phpunit/phpunit", "version": "10.5.0", "type": "library" }
+  ],
+  "aliases": [],
+  "minimum-stability": "stable",
+  "stability-flags": [],
+  "prefer-stable": true,
+  "prefer-lowest": false,
+  "platform": { "php": "^8.1" },
+  "platform-dev": [],
+  "plugin-api-version": "2.6.0"
+}
