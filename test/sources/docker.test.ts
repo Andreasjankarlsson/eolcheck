@@ -132,6 +132,29 @@ describe("compose", () => {
   });
 });
 
+describe("robustness", () => {
+  it("resolves YAML merge keys", async () => {
+    const r = await run({
+      "compose.yml": "x-base: &base\n  image: node:18\nservices:\n  a:\n    <<: *base\n",
+    });
+    expect(r.dependencies.map((d) => [d.name, d.version, d.source])).toEqual([["node", "18", "compose.yml"]]);
+  });
+
+  it("accepts duplicate YAML keys, last wins", async () => {
+    const r = await run({ "compose.yml": "services:\n  a:\n    image: node:16\n    image: node:18\n" });
+    expect(r.dependencies.map((d) => d.version)).toEqual(["18"]);
+  });
+
+  it("reports an unreadable file and carries on", async () => {
+    await mkdir(join(root, "Dockerfile"));
+    await writeFile(join(root, "api.Dockerfile"), "FROM node:18\n");
+    const paths = [join(root, "Dockerfile"), join(root, "api.Dockerfile")];
+    const r = await dockerSource.scan(paths, { root } as unknown as ScanContext);
+    expect(r.unrecognised).toEqual([{ source: "Dockerfile", reason: "couldn't parse Dockerfile" }]);
+    expect(r.dependencies.map((d) => d.name)).toEqual(["node"]);
+  });
+});
+
 describe("splitImage", () => {
   it("does not treat a registry port as a tag", () => {
     expect(splitImage("localhost:5000/app:1.2")).toEqual(["localhost:5000/app", "1.2", null]);

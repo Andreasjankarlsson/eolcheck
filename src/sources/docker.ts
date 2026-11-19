@@ -124,7 +124,7 @@ async function scanCompose(path: string, root: string, result: DetectResult): Pr
   const parseError = () => result.unrecognised.push({ source, reason: `couldn't parse ${basename(path)}` });
   let data: unknown;
   try {
-    data = parse(await readText(path));
+    data = parse(await readText(path), { merge: true, uniqueKeys: false });
   } catch {
     parseError();
     return;
@@ -154,8 +154,13 @@ export const dockerSource: Source = {
   async scan(files: string[], ctx: ScanContext): Promise<DetectResult> {
     const result = emptyResult();
     for (const file of files.filter(appliesTo)) {
-      if (COMPOSE.test(basename(file))) await scanCompose(file, ctx.root, result);
-      else await scanDockerfile(file, ctx.root, result);
+      try {
+        if (COMPOSE.test(basename(file))) await scanCompose(file, ctx.root, result);
+        else await scanDockerfile(file, ctx.root, result);
+      } catch {
+        // One unreadable file never stops the run.
+        result.unrecognised.push({ source: rel(ctx.root, file), reason: `couldn't parse ${basename(file)}` });
+      }
     }
     return result;
   },
