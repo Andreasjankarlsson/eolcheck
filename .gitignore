@@ -5,3 +5,6 @@ __pycache__/
 .pytest_tmp/
 .claude/
 examples/
+node_modules/
+dist/
+target/
