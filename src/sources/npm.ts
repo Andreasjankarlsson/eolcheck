@@ -82,7 +82,20 @@ async function versionFile(path: string, source: string, result: DetectResult): 
   else result.findings.push(finding("Node.js", version, version, source));
 }
 
-export const npmSource: Source = {
+/** True when the package-lock.json at `lock` lists `memberDir` (relative to the lock's folder) in `packages`. */
+async function listsMember(lock: string, memberDir: string): Promise<boolean> {
+  try {
+    const data: unknown = JSON.parse(await readText(lock));
+    const packages = isObject(data) ? data["packages"] : undefined;
+    return isObject(packages) && memberDir in packages;
+  } catch {
+    return false;
+  }
+}
+
+/** `resolveBin` is injectable so tests can make the plugin lookup fail. */
+export function createNpmSource(resolveBin: () => Promise<string> = pluginBin): Source {
+  return {
   name: "npm",
   async scan(files: string[], ctx: ScanContext): Promise<DetectResult> {
     const result = emptyResult();
@@ -97,6 +110,7 @@ export const npmSource: Source = {
     // Created lazily so scans without a package.json leave nothing behind.
     const tmp = await mkdtemp(join(tmpdir(), "eolchecker-npm-"));
     let runs = 0;
+    let bin: Promise<string> | undefined;
     try {
       for (const manifest of manifests) {
         const source = rel(ctx.root, manifest);
@@ -117,9 +131,16 @@ export const npmSource: Source = {
           result.unrecognised.push({ source, reason: "not scanned (yarn/pnpm not supported)" });
           continue;
         }
-        const base = lock === null ? dir : dirname(lock);
-        const installed = await exists(join(base, "node_modules"));
-        if (lock === null && !installed) {
+        let base = dir;
+        let hasLock = lock !== null;
+        if (lock !== null && dirname(lock) !== dir) {
+          // A lock higher up only covers this package when it lists it as a workspace member.
+          if (await listsMember(lock, rel(dirname(lock), dir))) base = dirname(lock);
+          else hasLock = false;
+        }
+        const installed = (await exists(join(dir, "node_modules"))) ||
+          (base !== dir && (await exists(join(base, "node_modules"))));
+        if (!hasLock && !installed) {
           result.unrecognised.push({ source, reason: "not scanned (no lock file)" });
           continue;
         }
@@ -131,11 +152,19 @@ export const npmSource: Source = {
         // The plugin looks for the lock file in its own folder, so a workspace member
         // is scanned from the lock's folder with -w.
         const memberDir = rel(base, dir);
+        let script: string;
+        try {
+          script = await (bin ??= resolveBin());
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          result.unrecognised.push({ source, reason: `not scanned (npm failed: ${message})` });
+          continue;
+        }
         const output = join(tmp, `bom-${++runs}.json`);
         const { NODE_ENV: _drop, ...env } = ctx.env;
         ctx.progress(`Running npm in ${rel(ctx.root, base) || "."}…`);
         const r = await ctx.run(
-          [process.execPath, await pluginBin(), "--output-format", "JSON", "--output-file", output,
+          [process.execPath, script, "--output-format", "JSON", "--output-file", output,
             ...(installed ? [] : ["--package-lock-only"]), ...(memberDir ? ["-w", memberDir] : [])],
           { cwd: base, env: { ...env, npm_config_omit: "" }, signal: ctx.signal },
         );
@@ -165,4 +194,7 @@ export const npmSource: Source = {
     }
     return result;
   },
-};
+  };
+}
+
+export const npmSource: Source = createNpmSource();

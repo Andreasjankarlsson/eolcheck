@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { finding } from "../../src/models.js";
 import { listFiles, type ScanContext } from "../../src/scan.js";
-import { npmSource } from "../../src/sources/npm.js";
+import { createNpmSource, npmSource } from "../../src/sources/npm.js";
 import type { Runner, RunResult } from "../../src/tools.js";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
@@ -52,9 +52,9 @@ function fakeNpm(recorded: string, result: Partial<RunResult> = {}): Runner {
 
 const never: Runner = async () => { throw new Error("must not run"); };
 
-async function scan(run: Runner, env: NodeJS.ProcessEnv = { PATH: bin, NODE_ENV: "production" }) {
+async function scan(run: Runner, env: NodeJS.ProcessEnv = { PATH: bin, NODE_ENV: "production" }, source = npmSource) {
   const ctx: ScanContext = { root, env, run, progress: (m) => progress.push(m), hint: () => {} };
-  return npmSource.scan(await listFiles(root), ctx);
+  return source.scan(await listFiles(root), ctx);
 }
 
 describe("npm source", () => {
@@ -104,10 +104,54 @@ describe("npm source", () => {
 
   it("reports a member the BOM does not contain", async () => {
     await project("npm-workspace");
-    await put("packages/b/package.json", JSON.stringify({ name: "b" }));
+    await put("packages/a/package.json", JSON.stringify({ name: "renamed" }));
     const result = await scan(fakeNpm("npm-workspace-a.json"));
     expect(result.unrecognised).toEqual([
-      { source: "packages/b/package.json", reason: "not scanned (npm failed: package not in SBOM)" }]);
+      { source: "packages/a/package.json", reason: "not scanned (npm failed: package not in SBOM)" }]);
+  });
+
+  it("ignores a root lock that does not list the sub-app", async () => {
+    await project("npm-workspace");
+    await put("tools/package.json", JSON.stringify({ name: "tools", engines: { node: "20" } }));
+    const result = await scan(fakeNpm("npm-workspace-a.json"));
+    expect(calls.map((c) => c.cwd)).toEqual([root, root]); // the root and member a, not tools
+    expect(result.unrecognised).toEqual([{ source: "tools/package.json", reason: "not scanned (no lock file)" }]);
+    expect(result.findings).toEqual([finding("Node.js", "20", "20", "tools/package.json")]);
+  });
+
+  it("treats an unreadable root lock as not listing the sub-app", async () => {
+    await put("package-lock.json", "{nope");
+    await put("app/package.json", "{}");
+    const result = await scan(never);
+    expect(result.unrecognised).toEqual([{ source: "app/package.json", reason: "not scanned (no lock file)" }]);
+  });
+
+  it("runs in a sub-app with its own node_modules and no usable lock", async () => {
+    await project("npm-workspace");
+    await put("tools/package.json", JSON.stringify({ name: "tools" }));
+    await put("tools/node_modules/x/package.json", "{}");
+    await scan(fakeNpm("npm-app.json"));
+    const tools = calls.find((c) => c.cwd === join(root, "tools"))!;
+    expect(tools.cmd).not.toContain("--package-lock-only");
+    expect(tools.cmd).not.toContain("-w");
+  });
+
+  it("treats a workspace member as installed when the lock folder has node_modules", async () => {
+    await project("npm-workspace");
+    await put("node_modules/is-number/package.json", "{}");
+    await scan(fakeNpm("npm-workspace-a.json"));
+    expect(calls).toHaveLength(2);
+    for (const c of calls) expect(c.cmd).not.toContain("--package-lock-only");
+  });
+
+  it("keeps Node.js rows when the plugin cannot be resolved", async () => {
+    await project("npm-app");
+    await put(".nvmrc", "20\n");
+    const source = createNpmSource(async () => { throw new Error("cannot find plugin"); });
+    const result = await scan(never, undefined, source);
+    expect(result.findings.map((f) => f.component)).toEqual(["Node.js", "Node.js"]);
+    expect(result.unrecognised).toEqual([
+      { source: "package.json", reason: "not scanned (npm failed: cannot find plugin)" }]);
   });
 
   it.each([["yarn.lock"], ["pnpm-lock.yaml"]])("reports %s as not scanned", async (lock) => {
