@@ -177,10 +177,25 @@ describe("main", () => {
 
   it("still writes the SBOM with --json", async () => {
     const file = join(tmp, "sbom.csv");
-    const { code, out } = await run([root, "--json", "--sbom", file]);
+    const { code, out, err } = await run([root, "--json", "--sbom", file]);
     expect(code).toBe(0);
     expect(await readFile(file, "utf8")).toContain("@angular/core");
-    expect(JSON.parse(out.split("SBOM written")[0]).rows).toHaveLength(1);
+    expect(JSON.parse(out).rows).toHaveLength(1);
+    expect(out).not.toContain("SBOM written");
+    expect(err).toContain(`SBOM written to ${file}`);
+  });
+
+  it("rejects an empty --sbom value", async () => {
+    const { code, err, scan } = await run([root, "--sbom", ""]);
+    expect(code).toBe(2);
+    expect(err).toContain("--sbom file must end in .csv or .md");
+    expect(scan).not.toHaveBeenCalled();
+  });
+
+  it("reports unexpected scan errors on one line and exits 1", async () => {
+    const { code, err } = await run([root], new Error("boom"));
+    expect(code).toBe(1);
+    expect(err).toBe("eolchecker: unexpected error: boom\n");
   });
 
   it("rejects --no-maven", async () => {

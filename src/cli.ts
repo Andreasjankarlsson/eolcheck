@@ -3,7 +3,7 @@
 import { realpathSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { extname, resolve } from "node:path";
+import { basename, extname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { ApiUnavailable, renderTable, scan as defaultScan, writeSbom, type Report } from "./index.js";
@@ -69,7 +69,7 @@ export async function main(argv: string[], deps: Deps = {}): Promise<number> {
     return 2;
   }
 
-  const sbomPath = values.sbom ? resolve(expandUser(values.sbom)) : undefined;
+  const sbomPath = values.sbom !== undefined ? resolve(expandUser(values.sbom)) : undefined;
   if (sbomPath !== undefined && ![".csv", ".md"].includes(extname(sbomPath).toLowerCase())) {
     stderr("--sbom file must end in .csv or .md\n");
     return 2;
@@ -101,7 +101,8 @@ export async function main(argv: string[], deps: Deps = {}): Promise<number> {
       stderr(`Couldn't fetch end-of-life dates from endoflife.date: ${err.message}\n`);
       return 1;
     }
-    throw err;
+    stderr(`eolchecker: unexpected error: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 1;
   }
 
   const nothing = !report.rows.length && !report.sbom.length && !report.unrecognised.length;
@@ -110,8 +111,7 @@ export async function main(argv: string[], deps: Deps = {}): Promise<number> {
   } else if (nothing) {
     stdout(`No dependencies found in ${root}\n`);
   } else {
-    const name = root.split("/").filter(Boolean).pop() ?? root;
-    stdout(renderTable(name, report, { color: isTTY }) + "\n");
+    stdout(renderTable(basename(root) || root, report, { color: isTTY }) + "\n");
   }
 
   if (sbomPath === undefined) return 0;
