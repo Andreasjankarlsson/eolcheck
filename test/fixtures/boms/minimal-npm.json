@@ -1,0 +1,22 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "metadata": {
+    "component": { "bom-ref": "app", "type": "application", "name": "app", "version": "1.0.0", "purl": "pkg:npm/app@1.0.0" }
+  },
+  "components": [
+    { "bom-ref": "@angular/core@16.2.0", "type": "library", "name": "core", "group": "@angular", "version": "16.2.0", "purl": "pkg:npm/%40angular/core@16.2.0" },
+    {
+      "bom-ref": "react@18.2.0", "type": "library", "name": "react", "version": "18.2.0", "purl": "pkg:npm/react@18.2.0",
+      "components": [
+        { "bom-ref": "js-tokens@4.0.0", "type": "library", "name": "js-tokens", "version": "4.0.0", "purl": "pkg:npm/js-tokens@4.0.0" }
+      ]
+    }
+  ],
+  "dependencies": [
+    { "ref": "app", "dependsOn": ["@angular/core@16.2.0", "react@18.2.0"] },
+    { "ref": "@angular/core@16.2.0", "dependsOn": [] },
+    { "ref": "react@18.2.0", "dependsOn": ["js-tokens@4.0.0"] },
+    { "ref": "js-tokens@4.0.0", "dependsOn": [] }
+  ]
+}
