@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -48,6 +48,41 @@ describe("tools", () => {
     const r = await runProcess([process.execPath, "-e", "console.log(process.argv[1])", "a b"], { cwd: tmp, env: process.env });
     expect(r.stdout).toBe("a b\n");
     expect(r.code).toBe(0);
+  });
+
+  it("passes shell metacharacters verbatim", async () => {
+    const r = await runProcess([process.execPath, "-e", "console.log(process.argv[1])", "a;b $HOME `x` | y"], { cwd: tmp, env: process.env });
+    expect(r.stdout).toBe("a;b $HOME `x` | y\n");
+  });
+
+  it("uses the env and cwd it is given", async () => {
+    const r = await runProcess(
+      [process.execPath, "-e", "console.log(process.env.EOLC_X, process.env.HOME, process.cwd())"],
+      { cwd: tmp, env: { PATH: process.env.PATH, EOLC_X: "yes" } },
+    );
+    const [x, home, cwd] = r.stdout.trim().split(" ");
+    expect(x).toBe("yes");
+    expect(home).toBe("undefined");
+    expect(await realpath(cwd!)).toBe(await realpath(tmp));
+  });
+
+  it("times out and kills a grandchild holding the pipes", async () => {
+    const pidFile = join(tmp, "pid");
+    const parent = `
+      const { spawn } = require("node:child_process");
+      const c = spawn(process.execPath, ["-e", "setTimeout(()=>{}, 60000)"], { stdio: "inherit" });
+      require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(c.pid));
+      setTimeout(() => {}, 60000);`;
+    const t = Date.now();
+    const r = await runProcess([process.execPath, "-e", parent], { cwd: tmp, env: process.env, timeoutMs: 500 });
+    expect(r.timedOut).toBe(true);
+    expect(Date.now() - t).toBeLessThan(2000);
+    const pid = Number(await readFile(pidFile, "utf8"));
+    let alive = true;
+    for (let i = 0; i < 20 && alive; i++) {
+      try { process.kill(pid, 0); await new Promise((res) => setTimeout(res, 50)); } catch { alive = false; }
+    }
+    expect(alive).toBe(false);
   });
 
   it("reports a missing executable", async () => {

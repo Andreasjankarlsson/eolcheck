@@ -23,24 +23,38 @@ export const runProcess: Runner = (cmd, opts) =>
   new Promise<RunResult>((resolve, reject) => {
     const { signal } = opts;
     if (signal?.aborted) { reject(abortError(signal)); return; }
-    const child = spawn(cmd[0]!, cmd.slice(1), { cwd: opts.cwd, env: opts.env, shell: false, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(cmd[0]!, cmd.slice(1), {
+      cwd: opts.cwd, env: opts.env, shell: false, stdio: ["ignore", "pipe", "pipe"], detached: true,
+    });
+    // Kill the whole process group so grandchildren (mvnw -> java) die too.
+    const killTree = (): void => {
+      try {
+        if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
+      } catch {
+        try { child.kill("SIGKILL"); } catch { /* already gone */ }
+      }
+    };
     let stdout = "";
     let stderr = "";
-    let timedOut = false;
     let settled = false;
     child.stdout.setEncoding("utf8").on("data", (d: string) => { stdout += d; });
     child.stderr.setEncoding("utf8").on("data", (d: string) => { stderr += d; });
 
     const onAbort = (): void => {
-      child.kill("SIGKILL");
+      killTree();
       finish(() => reject(abortError(signal!)));
     };
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    const timer = setTimeout(() => {
+      killTree();
+      finish(() => resolve({ code: null, stdout, stderr, timedOut: true }));
+    }, opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     const finish = (fn: () => void): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
+      child.stdout.destroy();
+      child.stderr.destroy();
       fn();
     };
     signal?.addEventListener("abort", onAbort, { once: true });
@@ -49,7 +63,7 @@ export const runProcess: Runner = (cmd, opts) =>
       if (err.code === "ENOENT") finish(() => resolve({ code: null, stdout: "", stderr: "not found", timedOut: false }));
       else finish(() => reject(err));
     });
-    child.on("close", (code) => finish(() => resolve({ code, stdout, stderr, timedOut })));
+    child.on("close", (code) => finish(() => resolve({ code, stdout, stderr, timedOut: false })));
   });
 
 async function isExecutableFile(p: string): Promise<boolean> {
