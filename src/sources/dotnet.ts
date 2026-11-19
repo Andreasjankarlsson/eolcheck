@@ -70,8 +70,9 @@ async function fileProperties(project: string): Promise<Record<string, string>> 
 }
 
 /** The properties as msbuild evaluates them, or null when msbuild is unavailable or its output is unusable. */
-async function msbuildProperties(project: string, ctx: ScanContext): Promise<Record<string, string> | null> {
-  const dotnet = await findTool("dotnet", ctx.env);
+async function msbuildProperties(
+  dotnet: string | null, project: string, ctx: ScanContext,
+): Promise<Record<string, string> | null> {
   if (dotnet === null) return null;
   const r = await ctx.run(
     [dotnet, "msbuild", project, ...TFM_PROPERTIES.map((p) => `-getProperty:${p}`)],
@@ -79,7 +80,10 @@ async function msbuildProperties(project: string, ctx: ScanContext): Promise<Rec
   );
   if (r.timedOut || r.code !== 0) return null;
   try {
-    const data: unknown = JSON.parse(r.stdout);
+    // dotnet may print a banner or first-run notice before the JSON.
+    const start = r.stdout.search(/^\{/m);
+    if (start < 0) return null;
+    const data: unknown = JSON.parse(r.stdout.slice(start));
     const props = isObject(data) ? data["Properties"] : undefined;
     if (!isObject(props)) return null;
     const out: Record<string, string> = {};
@@ -93,8 +97,10 @@ async function msbuildProperties(project: string, ctx: ScanContext): Promise<Rec
   }
 }
 
-async function targetFrameworks(project: string, source: string, ctx: ScanContext, result: DetectResult): Promise<void> {
-  const props = (await msbuildProperties(project, ctx)) ?? (await fileProperties(project));
+async function targetFrameworks(
+  dotnet: string | null, project: string, source: string, ctx: ScanContext, result: DetectResult,
+): Promise<void> {
+  const props = (await msbuildProperties(dotnet, project, ctx)) ?? (await fileProperties(project));
   const raw = props["TargetFrameworks"] ?? props["TargetFramework"] ?? props["TargetFrameworkVersion"];
   if (!raw) {
     result.unrecognised.push({ source, reason: NO_TARGET });
@@ -134,7 +140,8 @@ export const dotnetSource: Source = {
     const projects = files.filter((f) => PROJECT_SUFFIXES.some((s) => f.endsWith(s)));
     if (projects.length === 0) return result;
 
-    const hasDotnet = (await findTool("dotnet", ctx.env)) !== null;
+    const dotnet = await findTool("dotnet", ctx.env);
+    const hasDotnet = dotnet !== null;
     const tool = hasDotnet ? await findTool("dotnet-CycloneDX", ctx.env) : null;
     const hasTool = tool !== null;
     if (hasDotnet && !hasTool) {
@@ -147,7 +154,7 @@ export const dotnetSource: Source = {
     try {
       for (const project of projects) {
         const source = rel(ctx.root, project);
-        await targetFrameworks(project, source, ctx, result);
+        await targetFrameworks(dotnet, project, source, ctx, result);
 
         if (!hasDotnet) {
           result.unrecognised.push({ source, reason: "not scanned (dotnet not found)" });

@@ -132,6 +132,23 @@ describe(".NET source", () => {
     expect(msbuild.cwd).toBe(root);
   });
 
+  it("reads msbuild's JSON after a banner on stdout", async () => {
+    // The project file says net6.0; only msbuild (which sees Directory.Build.props) says net8.0.
+    await put("Lib.csproj", sdkProject("<TargetFramework>net6.0</TargetFramework>"));
+    await install("dotnet", "dotnet-CycloneDX");
+    const stdout = `Welcome to .NET 11.0!\n---------------------\nSDK Version: 11.0.100\n${msbuildJson("net8.0", "")}\n`;
+    const result = await scan(fake({ msbuild: { stdout } }));
+    expect(result.findings).toEqual([finding(".NET", "8.0", "net8.0", "Lib.csproj")]);
+  });
+
+  it("tolerates spaces and a trailing semicolon in TargetFrameworks", async () => {
+    await put("Lib.csproj", sdkProject(""));
+    await install("dotnet", "dotnet-CycloneDX");
+    const result = await scan(fake({ msbuild: { stdout: msbuildJson("", "net8.0; net48;") } }));
+    expect(result.findings.map((f) => f.display)).toEqual(["net8.0", "net48"]);
+    expect(result.unrecognised).toEqual([]);
+  });
+
   it("falls back to the project file when msbuild fails", async () => {
     await put("Lib.csproj", sdkProject("<TargetFramework>net6.0</TargetFramework>"));
     await install("dotnet", "dotnet-CycloneDX");
