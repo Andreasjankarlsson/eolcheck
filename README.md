@@ -216,6 +216,4 @@ EOLCHECKER_TOOLS=1 npx vitest run test/tools.integration.test.ts       # runs th
 EOLCHECKER_NETWORK=1 npx vitest run test/network.integration.test.ts   # against the real endoflife.date API
 ```
 
-The integration tests skip ecosystems whose tool isn't installed. The Python
-version in `src/eolchecker/` is still in the repo until the TypeScript version
-replaces it; `docs/parity-notes.md` compares the two.
+The integration tests skip ecosystems whose tool isn't installed.
