@@ -162,11 +162,12 @@ These don't fit any §7 change. They are left for the owner and the controller t
    `exit code N`. The line is trimmed and capped at 200 characters. Re-run on `examples/shop`:
 
    ```
-   reporting/pom.xml: not scanned (Maven failed: [ERROR] [ERROR] Some problems were encountered while processing the POMs:)
+   reporting/pom.xml: not scanned (Maven failed: [FATAL] Non-resolvable parent POM for com.example.corp:reporting:7: The following artifacts could not be resolved: com.example.corp:corp-parent:pom:7 (absent): com.example.corp:corp-parent:pom:7 was n…)
    ```
 
-   Better than `exit code 1`, but Maven's heading line comes before the specific cause (the
-   non-resolvable parent), which is on a later line.
+   A follow-up also skips generic lines (`Error: Command failed:`, Maven's "Some problems were
+   encountered" heading, `[Help 1]`, "Re-run Maven", marker-only lines) and collapses a
+   doubled `[ERROR] [ERROR]` marker, so the real cause is the reason.
 2. **The owner's example loses `net6.0 END OF LIFE` on this machine** because the SDK that
    `global.json` pins isn't installed and the §4 fallback reads the project file without
    `Directory.Build.props`. Accepted: the design (§4) reads the project file alone when msbuild

@@ -99,8 +99,12 @@ const ERROR_START = /^(\[ERROR\]|\[FATAL\]|npm error|npm ERR!)/;
 const ERROR_WORD = /error|not found/i;
 const MAX_REASON = 200;
 
+// Lines that say nothing about the cause: Node's exec line, and Maven's generic
+// heading and help lines.
+const NOISE = /^(Error: )?Command failed:|^(\[(ERROR|FATAL)\]\s*)*(Some problems were encountered|The build could not read|Re-run Maven|For more information|To see the full stack trace|\[Help \d+\]|@|-?>?\s*$)/;
+
 function lines(text: string): string[] {
-  return text.split("\n").map((l) => l.trim()).filter((l) => l !== "" && !l.startsWith("Command failed:"));
+  return text.split("\n").map((l) => l.trim()).filter((l) => l !== "" && !NOISE.test(l));
 }
 
 /**
@@ -115,6 +119,7 @@ export function describeFailure(tool: string, r: RunResult): string {
   const out = lines(r.stdout);
   const looksLikeError = (l: string) => ERROR_START.test(l) || ERROR_WORD.test(l);
   let line = err.find(looksLikeError) ?? out.find(looksLikeError) ?? err[0] ?? `exit code ${r.code}`;
+  line = line.replace(/^(\[(ERROR|FATAL)\]\s+)\[(ERROR|FATAL)\]\s+/, "$1");
   if (line.length > MAX_REASON) line = `${line.slice(0, MAX_REASON)}…`;
   return `not scanned (${tool} failed: ${line})`;
 }
