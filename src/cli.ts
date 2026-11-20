@@ -89,20 +89,33 @@ export async function main(argv: string[], deps: Deps = {}): Promise<number> {
     return 2;
   }
 
+  // Tools run detached, so Ctrl+C never reaches them; abort tells scan to kill them and clean up.
+  const controller = new AbortController();
+  const onSignal = (): void => controller.abort();
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
   let report: Report;
   try {
     report = await scan(root, {
       env: process.env,
       onProgress: (m) => stderr(`${m}\n`),
       warn: (m) => stderr(`${m}\n`),
+      signal: controller.signal,
     });
   } catch (err) {
+    if (controller.signal.aborted) {
+      stderr("Cancelled.\n");
+      return 130;
+    }
     if (err instanceof ApiUnavailable) {
       stderr(`Couldn't fetch end-of-life dates from endoflife.date: ${err.message}\n`);
       return 1;
     }
     stderr(`eolchecker: unexpected error: ${err instanceof Error ? err.message : String(err)}\n`);
     return 1;
+  } finally {
+    process.off("SIGINT", onSignal);
+    process.off("SIGTERM", onSignal);
   }
 
   const nothing = !report.rows.length && !report.sbom.length && !report.unrecognised.length;
@@ -137,5 +150,6 @@ function isEntryModule(): boolean {
 }
 
 if (isEntryModule()) {
-  process.exit(await main(process.argv.slice(2)));
+  // Set exitCode and let Node exit on its own: a hard exit can truncate piped stdout.
+  process.exitCode = await main(process.argv.slice(2));
 }

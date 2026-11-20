@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { finding } from "../../src/models.js";
 import { listFiles, type ScanContext } from "../../src/scan.js";
-import { createNpmSource, npmSource } from "../../src/sources/npm.js";
+import { createNpmSource, npmSource, runtimeEnv } from "../../src/sources/npm.js";
 import type { Runner, RunResult } from "../../src/tools.js";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures");
@@ -243,5 +243,12 @@ describe("Node.js runtime", () => {
     await put("package.json", "{nope");
     expect((await scan(never)).unrecognised).toEqual([
       { source: "package.json", reason: "couldn't parse package.json" }]);
+  });
+});
+
+describe("runtimeEnv", () => {
+  it("sets ELECTRON_RUN_AS_NODE only under Electron", () => {
+    expect(runtimeEnv({ node: "24.0.0" })).toEqual({});
+    expect(runtimeEnv({ node: "24.0.0", electron: "33.0.0" })).toEqual({ ELECTRON_RUN_AS_NODE: "1" });
   });
 });

@@ -9,9 +9,16 @@ export const FULL_URL = "https://endoflife.date/api/v1/products/full";
 const MAX_AGE_MS = 24 * 3600 * 1000;
 const CACHE_NAME = "products-full.json";
 
-const VERSION: string = (
-  JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string }
-).version;
+/** Package version for the User-Agent; "0" when package.json isn't readable (e.g. a bundled Electron main). */
+function readVersion(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version?: string };
+    return pkg.version || "0";
+  } catch {
+    return "0";
+  }
+}
+const VERSION: string = readVersion();
 
 /** endoflife.date could not be reached or returned something unusable. */
 export class ApiUnavailable extends Error {
@@ -105,12 +112,13 @@ async function readCache(path: string): Promise<{ catalogue: Catalogue; mtimeMs:
   }
 }
 
-async function download(fetchFn: typeof fetch): Promise<unknown> {
+async function download(fetchFn: typeof fetch, signal?: AbortSignal): Promise<unknown> {
   let resp: Response;
   try {
+    const timeout = AbortSignal.timeout(30_000);
     resp = await fetchFn(FULL_URL, {
       headers: { "User-Agent": `eolchecker/${VERSION}` },
-      signal: AbortSignal.timeout(30_000),
+      signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
       redirect: "follow",
     });
   } catch (err) {
@@ -139,6 +147,8 @@ export interface LoadOptions {
   now?: number;
   /** Receives the stale-cache warning. Defaults to a no-op. */
   warn?: (msg: string) => void;
+  /** Cancels the download. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -154,9 +164,10 @@ export async function loadCatalogue(opts: LoadOptions = {}): Promise<Catalogue> 
   let data: unknown;
   let catalogue: Catalogue;
   try {
-    data = await download(opts.fetch ?? fetch);
+    data = await download(opts.fetch ?? fetch, opts.signal);
     catalogue = parseCatalogue(data);
   } catch (err) {
+    opts.signal?.throwIfAborted();
     if (!cached || !(err instanceof ApiUnavailable)) throw err;
     warn(
       `Couldn't reach endoflife.date (${err.message}); ` +

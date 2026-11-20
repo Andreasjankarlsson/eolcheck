@@ -43,6 +43,7 @@ export async function scan(root: string, options: ScanOptions = {}): Promise<Rep
     },
   };
   const result = await detect(root, ctx, SOURCES);
+  options.signal?.throwIfAborted();
   if (!result.findings.length && !result.dependencies.length && !result.unrecognised.length) {
     return { rows: [], sbom: [], unrecognised: [], hints: [] };
   }
@@ -52,6 +53,7 @@ export async function scan(root: string, options: ScanOptions = {}): Promise<Rep
       loadCatalogue({
         cacheFile: join(options.cacheDir ?? defaultCacheDir(env), "products-full.json"),
         warn: options.warn,
+        signal: options.signal,
       }));
   return buildReport(result, await catalogue(), hints);
 }

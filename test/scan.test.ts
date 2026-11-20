@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -53,5 +53,41 @@ describe("scan", () => {
       { source: ".", reason: "couldn't scan with Boom" },
       { source: "pom.xml", reason: "x" },
     ]);
+  });
+});
+
+describe("listFiles robustness", () => {
+  it("skips an unreadable subfolder and reports it", async () => {
+    await touch(join(tmp, "a.txt"));
+    await mkdir(join(tmp, "sub", "locked"), { recursive: true });
+    await chmod(join(tmp, "sub", "locked"), 0o000);
+    try {
+      const unreadable: string[] = [];
+      expect(await listFiles(tmp, (p) => unreadable.push(p))).toEqual([join(tmp, "a.txt")]);
+      expect(unreadable).toEqual(["sub/locked"]);
+      const result = await detect(tmp, context(), []);
+      expect(result.unrecognised).toEqual([{ source: "sub/locked", reason: "couldn't read folder" }]);
+    } finally {
+      await chmod(join(tmp, "sub", "locked"), 0o755);
+    }
+  });
+
+  it("still throws when the root is unreadable", async () => {
+    await mkdir(join(tmp, "locked"));
+    await chmod(join(tmp, "locked"), 0o000);
+    try {
+      await expect(listFiles(join(tmp, "locked"))).rejects.toThrow();
+    } finally {
+      await chmod(join(tmp, "locked"), 0o755);
+    }
+  });
+
+  it("includes symlinked files but not symlinked folders", async () => {
+    await writeFile(join(tmp, "real.nvmrc"), "20\n");
+    await symlink(join(tmp, "real.nvmrc"), join(tmp, ".nvmrc"));
+    await touch(join(tmp, "dir", "inner.txt"));
+    await symlink(join(tmp, "dir"), join(tmp, "linkdir"));
+    await symlink(join(tmp, "nowhere"), join(tmp, "broken"));
+    expect(await listFiles(tmp)).toEqual([join(tmp, ".nvmrc"), join(tmp, "real.nvmrc"), join(tmp, "dir", "inner.txt")]);
   });
 });

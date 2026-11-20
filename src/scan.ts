@@ -1,7 +1,9 @@
 /** List a folder's files once and run every source on them. */
 
-import { readdir } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { rel } from "./util.js";
 import { emptyResult, merge, type DetectResult, type Unrecognised } from "./models.js";
 import type { Runner } from "./tools.js";
 
@@ -23,13 +25,37 @@ export interface Source {
   scan(files: string[], ctx: ScanContext): Promise<DetectResult>;
 }
 
-/** Absolute file paths under root, skipping SKIP_DIRS and not following symlinks. Each folder's files come before its subfolders, both sorted. */
-export async function listFiles(root: string): Promise<string[]> {
+async function isFileLike(dir: string, e: Dirent): Promise<boolean> {
+  if (e.isFile()) return true;
+  if (!e.isSymbolicLink()) return false;
+  try {
+    return (await stat(join(dir, e.name))).isFile();
+  } catch {
+    return false; // broken link
+  }
+}
+
+/**
+ * Absolute file paths under root, skipping SKIP_DIRS and not following folder symlinks
+ * (symlinked files are included). Each folder's files come before its subfolders, both sorted.
+ * A subfolder that can't be read is skipped and passed to `onUnreadable` (relative POSIX path);
+ * an unreadable root throws.
+ */
+export async function listFiles(root: string, onUnreadable?: (relPath: string) => void): Promise<string[]> {
   const out: string[] = [];
   const walk = async (dir: string): Promise<void> => {
-    const entries = await readdir(dir, { withFileTypes: true });
+    let entries: Dirent[];
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch (err) {
+      if (dir === root) throw err;
+      onUnreadable?.(rel(root, dir));
+      return;
+    }
     const byName = (a: { name: string }, b: { name: string }): number => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
-    for (const e of entries.filter((e) => e.isFile()).sort(byName)) out.push(join(dir, e.name));
+    const fileEntries: Dirent[] = [];
+    for (const e of entries) if (await isFileLike(dir, e)) fileEntries.push(e);
+    for (const e of fileEntries.sort(byName)) out.push(join(dir, e.name));
     for (const e of entries.filter((e) => e.isDirectory() && !SKIP_DIRS.has(e.name)).sort(byName)) {
       await walk(join(dir, e.name));
     }
@@ -39,8 +65,10 @@ export async function listFiles(root: string): Promise<string[]> {
 }
 
 export async function detect(root: string, ctx: ScanContext, sources: Source[]): Promise<DetectResult> {
-  const files = await listFiles(root);
+  const unreadable: string[] = [];
+  const files = await listFiles(root, (p) => unreadable.push(p));
   const result = emptyResult();
+  for (const p of unreadable) result.unrecognised.push({ source: p, reason: "couldn't read folder" });
   for (const source of sources) {
     try {
       merge(result, await source.scan(files, ctx));

@@ -29,7 +29,12 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-/** The plugin's CLI script, from the `bin` field of its package.json. */
+/** Extra env for spawning `process.execPath` as plain Node: under Electron it is the Electron binary. */
+export function runtimeEnv(versions: Record<string, string | undefined> = process.versions): NodeJS.ProcessEnv {
+  return versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {};
+}
+
+/** The plugin's CLI script,from the `bin` field of its package.json. */
 async function pluginBin(): Promise<string> {
   const main = fileURLToPath(import.meta.resolve("@cyclonedx/cyclonedx-npm"));
   const dir = dirname(main);
@@ -166,7 +171,7 @@ export function createNpmSource(resolveBin: () => Promise<string> = pluginBin): 
         const r = await ctx.run(
           [process.execPath, script, "--output-format", "JSON", "--output-file", output,
             ...(installed ? [] : ["--package-lock-only"]), ...(memberDir ? ["-w", memberDir] : [])],
-          { cwd: base, env: { ...env, npm_config_omit: "" }, signal: ctx.signal },
+          { cwd: base, env: { ...env, npm_config_omit: "", ...runtimeEnv() }, signal: ctx.signal },
         );
         if (r.timedOut || r.code !== 0) {
           result.unrecognised.push({ source, reason: describeFailure("npm", r) });

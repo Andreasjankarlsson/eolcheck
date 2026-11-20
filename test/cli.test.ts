@@ -240,3 +240,38 @@ describe("main", () => {
     expect(err).toContain("Usage: eolchecker");
   });
 });
+
+describe("main cancellation and exit", () => {
+  it("aborts the scan on SIGINT, prints Cancelled. and returns 130", async () => {
+    let seen: AbortSignal | undefined;
+    const scan = vi.fn(
+      (_root: string, options?: { signal?: AbortSignal }) =>
+        new Promise<Report>((_resolve, reject) => {
+          seen = options?.signal;
+          options?.signal?.addEventListener("abort", () => reject(options.signal!.reason));
+          setImmediate(() => process.emit("SIGINT"));
+        }),
+    );
+    let err = "";
+    let out = "";
+    const before = [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")];
+    const code = await main([root], { scan: scan as never, stdout: (s) => (out += s), stderr: (s) => (err += s) });
+    expect(code).toBe(130);
+    expect(seen?.aborted).toBe(true);
+    expect(err).toBe("Cancelled.\n");
+    expect(out).toBe("");
+    expect([process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")]).toEqual(before);
+  });
+
+  it("removes its signal handlers after a normal run", async () => {
+    const before = [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")];
+    await run([root]);
+    expect([process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")]).toEqual(before);
+  });
+
+  it("does not call process.exit in the entry block (it truncates piped stdout)", async () => {
+    const src = await readFile(new URL("../src/cli.ts", import.meta.url), "utf8");
+    expect(src).not.toMatch(/process\.exit\(/);
+    expect(src).toMatch(/process\.exitCode = await main\(/);
+  });
+});

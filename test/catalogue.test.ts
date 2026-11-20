@@ -140,3 +140,19 @@ describe("catalogue", () => {
     expect(defaultCacheDir({}, "darwin", "/h")).toBe("/h/Library/Caches/eolchecker");
   });
 });
+
+describe("loadCatalogue signal", () => {
+  it("passes a signal that follows the caller's abort to fetch", async () => {
+    const dir = await tmp();
+    const controller = new AbortController();
+    let seen: AbortSignal | undefined | null;
+    const f = (async (_url: string, init?: RequestInit) => {
+      seen = init?.signal;
+      return new Response(JSON.stringify(FULL), { status: 200 });
+    }) as unknown as typeof fetch;
+    await loadCatalogue({ cacheFile: join(dir, "c.json"), fetch: f, signal: controller.signal });
+    expect(seen?.aborted).toBe(false);
+    controller.abort();
+    expect(seen?.aborted).toBe(true);
+  });
+});

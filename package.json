@@ -7,11 +7,15 @@
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=24"
   },
   "scripts": {
     "build": "tsc",
+    "prepare": "npm run build",
     "postbuild": "node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\"",
     "test": "vitest run"
   },

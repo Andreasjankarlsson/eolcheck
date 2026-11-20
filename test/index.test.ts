@@ -88,3 +88,30 @@ describe("scan", () => {
     expect(typeof renderTable).toBe("function");
   });
 });
+
+describe("scan cancellation", () => {
+  it("rejects with AbortError when aborted while a runner is running, and hands the runner the signal", async () => {
+    await fakeMaven();
+    const controller = new AbortController();
+    let received: AbortSignal | undefined;
+    const runner: Runner = (_cmd, opts) =>
+      new Promise((_resolve, reject) => {
+        received = opts.signal;
+        opts.signal?.addEventListener("abort", () => reject(opts.signal!.reason));
+        setImmediate(() => controller.abort());
+      });
+    const err = await scan(root, { runner, signal: controller.signal, catalogue: async () => catalogue() }).catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).name).toBe("AbortError");
+    expect(received).toBe(controller.signal);
+  });
+
+  it("rejects for an already-aborted signal even with a Docker-only folder", async () => {
+    await writeFile(join(root, "Dockerfile"), "FROM node:18\n");
+    const factory = vi.fn(async () => catalogue());
+    const controller = new AbortController();
+    controller.abort();
+    await expect(scan(root, { signal: controller.signal, catalogue: factory })).rejects.toThrow();
+    expect(factory).not.toHaveBeenCalled();
+  });
+});

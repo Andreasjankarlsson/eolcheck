@@ -91,7 +91,7 @@ function cmpStr(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-/** First minimum, like Python's min(). */
+/** The first of several equal minima wins. */
 function minBy<T>(items: T[], cmp: (a: T, b: T) => number): T {
   let best = items[0];
   for (const item of items) if (cmp(item, best) < 0) best = item;
@@ -152,7 +152,7 @@ export function buildReport(
     });
   }
 
-  // Keyed by product slug + NUL + source; Map keeps Python's insertion order.
+  // Keyed by product slug + NUL + source; Map keeps first-seen order.
   const groups = new Map<string, { slug: string; source: string; members: Member[] }>();
   const addMember = (slug: string, source: string, member: Member) => {
     const k = `${slug}\0${source}`;

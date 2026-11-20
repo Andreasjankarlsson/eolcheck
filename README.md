@@ -147,6 +147,15 @@ don't get your shell's `PATH`, so they won't find `mvn`, `npm`, `dotnet` or
 `composer` unless you pass `env`. Loading the login shell's environment is up to
 the app. `env` defaults to `process.env`, `cacheDir` to the CLI's cache folder.
 
+The npm plugin is run with `process.execPath`, which in Electron is the Electron
+binary, so eolchecker sets `ELECTRON_RUN_AS_NODE=1` for that command when
+`process.versions.electron` is set. The plugin's script must be a real file
+outside `app.asar`, because it is run by a separate process. With electron-builder:
+
+```json
+"asarUnpack": ["node_modules/@cyclonedx/cyclonedx-npm/**"]
+```
+
 ## What it checks
 
 Any product endoflife.date tracks. Dependencies are matched from their package
@@ -192,6 +201,9 @@ A scan behaves like a normal developer build of the repo:
 - Maven writes `target/eolchecker-bom.json` in each module and may fill `~/.m2`.
 - The .NET tool runs a NuGet restore, which writes `obj/` and may fill the NuGet cache.
 - Other plugin output goes to a temporary folder that is removed afterwards.
+
+Scanning runs the repo's own build code (`./mvnw`, Maven plugins and extensions,
+MSBuild targets during restore, Composer plugins), so only scan repos you trust.
 
 eolchecker never changes tracked files. `target/` and `obj/` are build folders
 that repos normally ignore.
