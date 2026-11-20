@@ -97,6 +97,28 @@ describe("tools", () => {
     await expect(p).rejects.toMatchObject({ name: "AbortError" });
   });
 
+  it("finds Maven's error on stdout", () => {
+    const stdout = "[ERROR] Non-resolvable parent POM for com.example:reporting:1.0: Could not find artifact x:y:pom:1 and 'parent.relativePath' points at wrong local POM @ line 5, column 13 " + "x".repeat(200) + "\n[ERROR] help";
+    expect(describeFailure("Maven", { code: 1, stderr: "", stdout, timedOut: false }))
+      .toBe(`not scanned (Maven failed: ${stdout.split("\n")[0]!.slice(0, 200)}…)`);
+    expect(describeFailure("Maven", { code: 1, stderr: "", stdout: "[ERROR] Non-resolvable parent POM", timedOut: false }))
+      .toBe("not scanned (Maven failed: [ERROR] Non-resolvable parent POM)");
+  });
+
+  it("finds the .NET SDK cause below the first stderr line", () => {
+    const stderr = "Unable to find local package cache locations...\nSome other line\nA compatible .NET SDK was not found. Requested SDK version: 6.0.428\nInstall it.";
+    expect(describeFailure("CycloneDX .NET tool", { code: 1, stderr, stdout: "", timedOut: false }))
+      .toBe("not scanned (CycloneDX .NET tool failed: A compatible .NET SDK was not found. Requested SDK version: 6.0.428)");
+  });
+
+  it("skips Node's exec line for cyclonedx-npm", () => {
+    const stderr = "Command failed: /usr/bin/node -- /usr/lib/npm-cli.js ls --json\nCommand failed: /usr/bin/node -- /usr/lib/npm-cli.js ls\nnpm error code ELSPROBLEMS\nnpm error missing: x@1";
+    expect(describeFailure("cyclonedx-npm", { code: 1, stderr, stdout: "", timedOut: false }))
+      .toBe("not scanned (cyclonedx-npm failed: npm error code ELSPROBLEMS)");
+    expect(describeFailure("cyclonedx-npm", { code: 1, stderr: "Command failed: x\nplain text", stdout: "", timedOut: false }))
+      .toBe("not scanned (cyclonedx-npm failed: plain text)");
+  });
+
   it("describes failures", () => {
     expect(describeFailure("Maven", { code: 1, stderr: "\n[ERROR] boom\nmore", stdout: "", timedOut: false }))
       .toBe("not scanned (Maven failed: [ERROR] boom)");

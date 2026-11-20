@@ -23,6 +23,18 @@ describe("directDependencies", () => {
     });
   });
 
+  it("displays the version as written, normalising only for matching", () => {
+    const cases: [string, string, string, string][] = [
+      ["pkg:maven/org.hibernate.orm/hibernate-core@6.2.13.Final", "6.2.13.Final", "6.2.13", "6.2.13.Final"],
+      ["pkg:npm/x@1.0.0-beta.2", "1.0.0-beta.2", "1.0.0", "1.0.0-beta.2"],
+      ["pkg:composer/laravel/framework@v10.48.4", "v10.48.4", "10.48.4", "10.48.4"],
+    ];
+    for (const [purl, raw, version, display] of cases) {
+      const [dep] = directDependencies(bomWith(purl, raw), "m");
+      expect([dep?.version, dep?.display], purl).toEqual([version, display]);
+    }
+  });
+
   it("maps purls to ecosystems and names", () => {
     const cases: [string, string, string][] = [
       ["pkg:npm/%40angular/core@16.2.0", "npm", "@angular/core"],

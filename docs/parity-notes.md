@@ -128,8 +128,14 @@ These don't fit any §7 change. They are left for the owner and the controller t
   version that doesn't exist.
 - Effect: display only. Matching and status use the normalised version in both versions, so
   this can't cause a false END OF LIFE.
-- Possible fix: `display: text` (the raw resolved version), with a test in
-  `test/cyclonedx.test.ts`.
+- Fixed after the parity check, in commit `fix(ts): show versions as written; clearer tool
+  failure reasons`: `display` is the raw resolved version (a leading `v` is dropped so
+  Composer still shows `10.48.4`); `version` stays normalised. Re-run of the TypeScript
+  version on a copy of `examples/shop`:
+
+  ```
+  Hibernate ORM   6.2.13.Final  backend/orders/pom.xml         2026-05-03      7.4.16   END OF LIFE
+  ```
 
 ### U2. SDK-implicit NuGet packages appear as dependencies
 
@@ -144,22 +150,27 @@ These don't fit any §7 change. They are left for the owner and the controller t
   dependencies only" rule says they shouldn't be there.
 - Effect: SBOM only. Neither package is in endoflife.date, so no status and no false
   END OF LIFE. This would show on any machine where the project can be restored.
-- Possible fix: drop these two well-known SDK-implicit package ids in `src/sources/dotnet.ts`,
-  or accept them as a §7-style change.
+- Accepted: untracked SBOM rows. Filtering would need a hand-written list of package ids,
+  against the rewrite's maintainability goal; the owner can ask for a filter.
 
 ## Concerns (expected behaviour, worth a look)
 
-1. **Failure reasons can say little.** `describeFailure` (`src/tools.ts`) takes the first
-   stderr line, as the spec says. Maven with `-q` writes its errors to stdout, so
-   `reporting/pom.xml` shows `not scanned (Maven failed: exit code 1)` instead of "Non-resolvable
-   parent POM". For `api/`, the .NET tool's first stderr line is
-   `Unable to find local package cache locations...` while the real cause, further down, is
-   "A compatible .NET SDK was not found. Requested SDK version: 6.0.428". Falling back to the
-   first `[ERROR]`/`[FATAL]` stdout line for Maven, and looking for "compatible .NET SDK was
-   not found" for dotnet, would make both clearer.
+1. **Failure reasons can say little.** Improved after the parity check: `describeFailure`
+   (`src/tools.ts`) now picks the first line in stderr, then stdout, that starts with
+   `[ERROR]`, `[FATAL]`, `npm error` or `npm ERR!` or contains `error` / `not found`
+   (skipping Node's `Command failed:` lines); else the first non-empty stderr line; else
+   `exit code N`. The line is trimmed and capped at 200 characters. Re-run on `examples/shop`:
+
+   ```
+   reporting/pom.xml: not scanned (Maven failed: [ERROR] [ERROR] Some problems were encountered while processing the POMs:)
+   ```
+
+   Better than `exit code 1`, but Maven's heading line comes before the specific cause (the
+   non-resolvable parent), which is on a later line.
 2. **The owner's example loses `net6.0 END OF LIFE` on this machine** because the SDK that
    `global.json` pins isn't installed and the §4 fallback reads the project file without
-   `Directory.Build.props`. It is reported as a gap, not hidden, and a developer with that
-   SDK gets the row. Python read the props file itself and didn't need the SDK.
+   `Directory.Build.props`. Accepted: the design (§4) reads the project file alone when msbuild
+   can't evaluate; the gap is visible (reported, not hidden), and a developer with that SDK
+   gets the row.
 3. Composer couldn't be checked against a real Composer run (not installed); its BOM shape
    comes from a hand-written fixture.

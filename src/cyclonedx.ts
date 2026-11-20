@@ -67,7 +67,10 @@ function toDependency(component: Json, source: string): Dependency | null {
   if (version === null) {
     return { ...base, version: null, display: text, missing: `'${text}' isn't a version` };
   }
-  return { ...base, version, display: version };
+  // One rule for every ecosystem: show the resolved version as written in the BOM
+  // ("6.2.13.Final", "1.0.0-beta.2"); only `version` is normalised, for matching.
+  // A leading "v"/"V" is dropped so Composer's "v10.48.4" shows as "10.48.4".
+  return { ...base, version, display: text.replace(/^[vV](?=\d)/, "") };
 }
 
 /**

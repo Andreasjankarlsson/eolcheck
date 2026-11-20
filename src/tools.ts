@@ -95,8 +95,26 @@ export async function findMaven(pomDir: string, root: string, env: NodeJS.Proces
   return mvn ? [mvn] : null;
 }
 
+const ERROR_START = /^(\[ERROR\]|\[FATAL\]|npm error|npm ERR!)/;
+const ERROR_WORD = /error|not found/i;
+const MAX_REASON = 200;
+
+function lines(text: string): string[] {
+  return text.split("\n").map((l) => l.trim()).filter((l) => l !== "" && !l.startsWith("Command failed:"));
+}
+
+/**
+ * Why a tool failed, in one line. First match wins: the first error-looking line
+ * in stderr, then stdout (Maven -q writes errors to stdout); else the first
+ * non-empty stderr line; else the exit code. Node's own "Command failed:" exec
+ * lines are skipped.
+ */
 export function describeFailure(tool: string, r: RunResult): string {
   if (r.timedOut) return `not scanned (${tool} timed out)`;
-  const line = r.stderr.split("\n").map((l) => l.trim()).find((l) => l !== "");
-  return `not scanned (${tool} failed: ${line ?? `exit code ${r.code}`})`;
+  const err = lines(r.stderr);
+  const out = lines(r.stdout);
+  const looksLikeError = (l: string) => ERROR_START.test(l) || ERROR_WORD.test(l);
+  let line = err.find(looksLikeError) ?? out.find(looksLikeError) ?? err[0] ?? `exit code ${r.code}`;
+  if (line.length > MAX_REASON) line = `${line.slice(0, MAX_REASON)}…`;
+  return `not scanned (${tool} failed: ${line})`;
 }
