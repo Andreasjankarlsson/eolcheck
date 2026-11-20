@@ -1,0 +1,48 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "tools": [
+      { "vendor": "cyclonedx", "name": "cyclonedx-php-composer", "version": "6.2.0" }
+    ],
+    "component": {
+      "type": "application",
+      "bom-ref": "acme/composer-app",
+      "group": "acme",
+      "name": "composer-app"
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "laravel/framework",
+      "group": "laravel",
+      "name": "framework",
+      "version": "v10.48.4",
+      "purl": "pkg:composer/laravel/framework@v10.48.4"
+    },
+    {
+      "type": "library",
+      "bom-ref": "phpunit/phpunit",
+      "group": "phpunit",
+      "name": "phpunit",
+      "version": "10.5.0",
+      "purl": "pkg:composer/phpunit/phpunit@10.5.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "psr/log",
+      "group": "psr",
+      "name": "log",
+      "version": "3.0.0",
+      "purl": "pkg:composer/psr/log@3.0.0"
+    }
+  ],
+  "dependencies": [
+    { "ref": "acme/composer-app", "dependsOn": ["laravel/framework", "phpunit/phpunit"] },
+    { "ref": "laravel/framework", "dependsOn": ["psr/log"] },
+    { "ref": "phpunit/phpunit", "dependsOn": [] },
+    { "ref": "psr/log", "dependsOn": [] }
+  ]
+}

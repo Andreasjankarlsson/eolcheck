@@ -1,0 +1,11 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "metadata": { "component": { "bom-ref": "app", "type": "application", "name": "app" } },
+  "components": [
+    { "bom-ref": "a", "name": "a", "version": "github:user/repo", "purl": "pkg:npm/a" },
+    { "bom-ref": "b", "name": "b", "version": "file:../lib", "purl": "pkg:npm/b" },
+    { "bom-ref": "c", "name": "c", "purl": "pkg:npm/c" }
+  ],
+  "dependencies": [{ "ref": "app", "dependsOn": ["a", "b", "c"] }]
+}

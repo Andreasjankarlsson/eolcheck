@@ -1,0 +1,32 @@
+{
+  "name": "eolchecker",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "eolchecker": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build",
+    "postbuild": "node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\"",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@cyclonedx/cyclonedx-npm": "7.0.1",
+    "fast-xml-parser": "5.12.1",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1"
+  }
+}
